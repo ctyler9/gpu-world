@@ -48,6 +48,10 @@
         Sphere(at: (-1.55, 2.10, -5.6), r: 0.18, mat: "violet"),
         Sphere(at: ( 1.55, 2.10, -5.6), r: 0.18, mat: "cyan"),
 
+        Arch(center: (0.0, 0.0, -0.2), width: 3.2, height: 2.65, depth: 0.22, thickness: 0.28, mat: "chrome"),
+        Arch(center: (0.0, 0.0, -2.9), width: 3.2, height: 2.65, depth: 0.22, thickness: 0.28, mat: "chrome"),
+        Arch(center: (0.0, 0.0, -5.6), width: 3.2, height: 2.65, depth: 0.22, thickness: 0.28, mat: "chrome"),
+
         Sphere(at: (0.0, 0.55, -1.8), r: 0.55, mat: "chrome"),
         Sphere(at: (0.0, 0.38, -4.5), r: 0.38, mat: "glass"),
         Sphere(at: (0.0, 1.7, -3.2), r: 5000.0, mat: "void"),

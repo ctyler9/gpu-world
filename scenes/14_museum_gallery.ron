@@ -32,15 +32,18 @@
         Sphere(at: ( 0.0, 3.35, -2.1), r: 0.34, mat: "lamp"),
         Sphere(at: ( 2.2, 3.25, -2.8), r: 0.30, mat: "lamp"),
 
-        Sphere(at: (-2.05, 0.34, -1.55), r: 0.34, mat: "stone"),
+        Box(min: (-2.45, 0.00, -1.95), max: (-1.65, 0.46, -1.15), mat: "stone"),
         Sphere(at: (-2.05, 0.92, -1.55), r: 0.58, mat: "blue_glass"),
 
-        Sphere(at: (0.0, 0.42, -1.85), r: 0.42, mat: "stone"),
+        Box(min: (-0.58, 0.00, -2.43), max: ( 0.58, 0.52, -1.27), mat: "stone"),
         Sphere(at: (0.0, 1.00, -1.85), r: 0.82, mat: "bronze"),
         Sphere(at: (0.0, 1.78, -1.85), r: 0.34, mat: "bronze"),
 
-        Sphere(at: (2.05, 0.32, -1.50), r: 0.32, mat: "stone"),
+        Box(min: ( 1.68, 0.00, -1.87), max: ( 2.42, 0.42, -1.13), mat: "stone"),
         Sphere(at: (2.05, 0.86, -1.50), r: 0.54, mat: "red"),
+
+        Column(center: (-3.45, 0.0, -3.15), radius: 0.13, y_min: 0.0, y_max: 3.6, mat: "stone"),
+        Column(center: ( 3.45, 0.0, -3.15), radius: 0.13, y_min: 0.0, y_max: 3.6, mat: "stone"),
 
         Sphere(at: (0.0, 2.0, -0.8), r: 5000.0, mat: "void"),
     ],

@@ -69,12 +69,21 @@ pub struct Sphere {
 
 #[derive(Debug, Copy, Clone, Pod, Zeroable)]
 #[repr(C)]
-struct SphereBufferEntry {
-    center: Vec3,
-    radius: f32,
+struct ObjectBufferEntry {
+    data0: Vec3,
+    kind: u32,
+    data1: Vec3,
     material_index: u32,
-    _pad: [u32; 3],
+    data2: Vec3,
+    _pad: u32,
 }
+
+const OBJECT_KIND_SPHERE: u32 = 0;
+const OBJECT_KIND_BOX: u32 = 1;
+const OBJECT_KIND_CYLINDER: u32 = 2;
+
+// Must match the `Object` struct stride in shaders.wgsl.
+const _: () = assert!(std::mem::size_of::<ObjectBufferEntry>() == 48);
 
 #[derive(Copy, Clone)]
 pub struct MaterialId(u32);
@@ -90,7 +99,7 @@ impl MaterialId {
 #[derive(Default)]
 pub struct SceneBuilder {
     materials: Vec<Material>,
-    spheres: Vec<SphereBufferEntry>,
+    objects: Vec<ObjectBufferEntry>,
 }
 
 impl SceneBuilder {
@@ -111,13 +120,15 @@ impl SceneBuilder {
     }
 
     pub fn add_sphere(&mut self, sphere: Sphere, material: MaterialId) {
-        let entry = SphereBufferEntry {
-            center: sphere.center,
-            radius: sphere.radius,
+        let entry = ObjectBufferEntry {
+            data0: sphere.center,
+            kind: OBJECT_KIND_SPHERE,
+            data1: Vec3::new(sphere.radius, 0.0, 0.0),
             material_index: material.0,
-            _pad: [0; 3],
+            data2: Vec3::zero(),
+            _pad: 0,
         };
-        self.spheres.push(entry)
+        self.objects.push(entry)
     }
 
     /// Fluent, chainable sphere placement. Accepts a tuple/array position:
@@ -141,6 +152,42 @@ impl SceneBuilder {
     /// A large sphere standing in for an infinite ground plane at y = 0.
     pub fn ground(&mut self, material: MaterialId) -> &mut Self {
         self.sphere((0., -200.001, 0.), 200., material)
+    }
+
+    pub fn cuboid(
+        &mut self,
+        min: impl Into<Vec3>,
+        max: impl Into<Vec3>,
+        material: MaterialId,
+    ) -> &mut Self {
+        self.objects.push(ObjectBufferEntry {
+            data0: min.into(),
+            kind: OBJECT_KIND_BOX,
+            data1: max.into(),
+            material_index: material.0,
+            data2: Vec3::zero(),
+            _pad: 0,
+        });
+        self
+    }
+
+    pub fn cylinder(
+        &mut self,
+        center: impl Into<Vec3>,
+        radius: f32,
+        y_min: f32,
+        y_max: f32,
+        material: MaterialId,
+    ) -> &mut Self {
+        self.objects.push(ObjectBufferEntry {
+            data0: center.into(),
+            kind: OBJECT_KIND_CYLINDER,
+            data1: Vec3::new(radius, y_min, y_max),
+            material_index: material.0,
+            data2: Vec3::zero(),
+            _pad: 0,
+        });
+        self
     }
 
     /// Place objects on a `cols` x `rows` grid in the XZ plane, centered on
@@ -194,7 +241,7 @@ impl SceneBuilder {
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
     ) -> wgpu::BindGroup {
-        let n = self.spheres.len() as u32;
+        let n = self.objects.len() as u32;
         let header = GridHeader::single_cell();
         let cell_ranges = [0u32, n]; // one cell: start 0, count n
         let indices: Vec<u32> = (0..n).collect();
@@ -226,8 +273,8 @@ impl SceneBuilder {
     ) -> wgpu::BindGroup {
         let material_buffer =
             create_storage_buffer_with_data(device, &self.materials, Some("materials"));
-        let spheres_buffer =
-            create_storage_buffer_with_data(device, &self.spheres, Some("spheres"));
+        let objects_buffer =
+            create_storage_buffer_with_data(device, &self.objects, Some("objects"));
         let header_buffer = create_storage_buffer_with_data(
             device,
             std::slice::from_ref(&header),
@@ -251,7 +298,7 @@ impl SceneBuilder {
             layout,
             entries: &[
                 entry(0, &material_buffer),
-                entry(1, &spheres_buffer),
+                entry(1, &objects_buffer),
                 entry(2, &header_buffer),
                 entry(3, &ranges_buffer),
                 entry(4, &indices_buffer),

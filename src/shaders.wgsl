@@ -101,17 +101,26 @@ fn is_intersection_valid(hit: Intersection) -> bool {
   return hit.t > 0.;
 }
 
-struct Sphere {
-  center: vec3f,
-  radius: f32,
+struct Object {
+  data0: vec3f,
+  kind: u32,
+  data1: vec3f,
   material_index: u32,
+  data2: vec3f,
+  _pad: u32,
 }
 
-fn intersect_sphere(ray: Ray, sphere: Sphere) -> Intersection {
-  let v = ray.origin - sphere.center;
+const OBJECT_KIND_SPHERE: u32 = 0u;
+const OBJECT_KIND_BOX: u32 = 1u;
+const OBJECT_KIND_CYLINDER: u32 = 2u;
+
+fn intersect_sphere(ray: Ray, object: Object) -> Intersection {
+  let center = object.data0;
+  let radius = object.data1.x;
+  let v = ray.origin - center;
   let a = dot(ray.direction, ray.direction);
   let b = dot(v, ray.direction);
-  let c = dot(v, v) - sphere.radius * sphere.radius;
+  let c = dot(v, v) - radius * radius;
 
   let d = b * b - a * c;
   if d < 0. {
@@ -129,8 +138,127 @@ fn intersect_sphere(ray: Ray, sphere: Sphere) -> Intersection {
   }
 
   let p = point_on_ray(ray, t);
-  let N = (p - sphere.center) / sphere.radius;
-  return Intersection(N, t, sphere.material_index);
+  let N = (p - center) / radius;
+  return Intersection(N, t, object.material_index);
+}
+
+fn intersect_box(ray: Ray, object: Object) -> Intersection {
+  let box_min = object.data0;
+  let box_max = object.data1;
+  var t_min = -FLT_MAX;
+  var t_max = FLT_MAX;
+
+  for (var axis = 0u; axis < 3u; axis += 1u) {
+    let origin = ray.origin[axis];
+    let direction = ray.direction[axis];
+    let lo = box_min[axis];
+    let hi = box_max[axis];
+    if abs(direction) < 1e-8 {
+      if origin < lo || origin > hi {
+        return no_intersection();
+      }
+    } else {
+      let inv = 1.0 / direction;
+      var t0 = (lo - origin) * inv;
+      var t1 = (hi - origin) * inv;
+      if t0 > t1 {
+        let tmp = t0;
+        t0 = t1;
+        t1 = tmp;
+      }
+      t_min = max(t_min, t0);
+      t_max = min(t_max, t1);
+      if t_min > t_max {
+        return no_intersection();
+      }
+    }
+  }
+
+  let t = select(t_max, t_min, t_min >= EPSILON);
+  if t < EPSILON {
+    return no_intersection();
+  }
+
+  let p = point_on_ray(ray, t);
+  let eps = 1e-3;
+  var normal = vec3f(0.0);
+  if abs(p.x - box_min.x) < eps {
+    normal = vec3f(-1.0, 0.0, 0.0);
+  } else if abs(p.x - box_max.x) < eps {
+    normal = vec3f(1.0, 0.0, 0.0);
+  } else if abs(p.y - box_min.y) < eps {
+    normal = vec3f(0.0, -1.0, 0.0);
+  } else if abs(p.y - box_max.y) < eps {
+    normal = vec3f(0.0, 1.0, 0.0);
+  } else if abs(p.z - box_min.z) < eps {
+    normal = vec3f(0.0, 0.0, -1.0);
+  } else {
+    normal = vec3f(0.0, 0.0, 1.0);
+  }
+  return Intersection(normal, t, object.material_index);
+}
+
+fn intersect_cylinder(ray: Ray, object: Object) -> Intersection {
+  let center = object.data0;
+  let radius = object.data1.x;
+  let y_min = object.data1.y;
+  let y_max = object.data1.z;
+  var closest_t = FLT_MAX;
+  var normal = vec3f(0.0);
+
+  let oc = ray.origin - center;
+  let a = ray.direction.x * ray.direction.x + ray.direction.z * ray.direction.z;
+  let b = oc.x * ray.direction.x + oc.z * ray.direction.z;
+  let c = oc.x * oc.x + oc.z * oc.z - radius * radius;
+  let d = b * b - a * c;
+  if a > 1e-8 && d >= 0.0 {
+    let sqrt_d = sqrt(d);
+    let recip_a = 1.0 / a;
+    let t0 = (-b - sqrt_d) * recip_a;
+    let t1 = (-b + sqrt_d) * recip_a;
+    for (var i = 0u; i < 2u; i += 1u) {
+      let t = select(t1, t0, i == 0u);
+      let y = ray.origin.y + ray.direction.y * t;
+      if t >= EPSILON && y >= y_min && y <= y_max && t < closest_t {
+        closest_t = t;
+        let p = point_on_ray(ray, t);
+        normal = normalize(vec3f(p.x - center.x, 0.0, p.z - center.z));
+      }
+    }
+  }
+
+  if abs(ray.direction.y) > 1e-8 {
+    let cap_values = vec2f(y_min, y_max);
+    for (var i = 0u; i < 2u; i += 1u) {
+      let cap_y = cap_values[i];
+      let t = (cap_y - ray.origin.y) / ray.direction.y;
+      let p = point_on_ray(ray, t);
+      let dx = p.x - center.x;
+      let dz = p.z - center.z;
+      if t >= EPSILON && dx * dx + dz * dz <= radius * radius && t < closest_t {
+        closest_t = t;
+        normal = select(vec3f(0.0, 1.0, 0.0), vec3f(0.0, -1.0, 0.0), i == 0u);
+      }
+    }
+  }
+
+  if closest_t == FLT_MAX {
+    return no_intersection();
+  }
+  return Intersection(normal, closest_t, object.material_index);
+}
+
+fn intersect_object(ray: Ray, object: Object) -> Intersection {
+  if object.kind == OBJECT_KIND_SPHERE {
+    return intersect_sphere(ray, object);
+  }
+  if object.kind == OBJECT_KIND_BOX {
+    return intersect_box(ray, object);
+  }
+  if object.kind == OBJECT_KIND_CYLINDER {
+    return intersect_cylinder(ray, object);
+  }
+  return no_intersection();
 }
 
 // Test every sphere bucketed into `cell`, updating the running closest hit.
@@ -140,7 +268,7 @@ fn test_cell(ray: Ray, cell: u32, closest: ptr<function, Intersection>) {
   let count = cell_ranges[base + 1u];
   for (var k = 0u; k < count; k += 1u) {
     let si = sphere_indices[start + k];
-    let hit = intersect_sphere(ray, spheres[si]);
+    let hit = intersect_object(ray, objects[si]);
     if hit.t > 0. && hit.t < (*closest).t {
       *closest = hit;
     }
@@ -367,7 +495,7 @@ struct GridHeader {
 }
 
 @group(1) @binding(0) var<storage> materials: array<Material>;
-@group(1) @binding(1) var<storage> spheres: array<Sphere>;
+@group(1) @binding(1) var<storage> objects: array<Object>;
 @group(1) @binding(2) var<storage> grid: GridHeader;
 @group(1) @binding(3) var<storage> cell_ranges: array<u32>;
 @group(1) @binding(4) var<storage> sphere_indices: array<u32>;

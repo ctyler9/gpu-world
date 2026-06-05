@@ -124,6 +124,38 @@ enum ObjectDef {
         r: f32,
         mat: String,
     },
+    Box {
+        min: Vec3Def,
+        max: Vec3Def,
+        mat: String,
+    },
+    Cylinder {
+        center: Vec3Def,
+        radius: f32,
+        y_min: f32,
+        y_max: f32,
+        mat: String,
+    },
+    WallPanel {
+        min: Vec3Def,
+        max: Vec3Def,
+        mat: String,
+    },
+    Column {
+        center: Vec3Def,
+        radius: f32,
+        y_min: f32,
+        y_max: f32,
+        mat: String,
+    },
+    Arch {
+        center: Vec3Def,
+        width: f32,
+        height: f32,
+        depth: f32,
+        thickness: f32,
+        mat: String,
+    },
     /// A large sphere standing in for the ground plane at y = 0.
     Ground(String),
     /// A `cols` x `rows` grid of spheres on the XZ plane, centered on `origin`.
@@ -299,6 +331,61 @@ impl SceneDef {
             match object {
                 ObjectDef::Sphere { at, r, mat } => {
                     builder.sphere(*at, *r, lookup(mat)?);
+                }
+                ObjectDef::Box { min, max, mat }
+                | ObjectDef::WallPanel { min, max, mat } => {
+                    builder.cuboid(*min, *max, lookup(mat)?);
+                }
+                ObjectDef::Cylinder {
+                    center,
+                    radius,
+                    y_min,
+                    y_max,
+                    mat,
+                }
+                | ObjectDef::Column {
+                    center,
+                    radius,
+                    y_min,
+                    y_max,
+                    mat,
+                } => {
+                    builder.cylinder(*center, *radius, *y_min, *y_max, lookup(mat)?);
+                }
+                ObjectDef::Arch {
+                    center,
+                    width,
+                    height,
+                    depth,
+                    thickness,
+                    mat,
+                } => {
+                    let c: Vec3 = (*center).into();
+                    let id = lookup(mat)?;
+                    let half_w = width * 0.5;
+                    let half_d = depth * 0.5;
+                    let leg_r = thickness * 0.5;
+                    let y0 = c.y();
+                    let y1 = c.y() + height - thickness;
+                    builder.cylinder(
+                        (c.x() - half_w + leg_r, 0.0, c.z()),
+                        leg_r,
+                        y0,
+                        y1,
+                        id,
+                    );
+                    builder.cylinder(
+                        (c.x() + half_w - leg_r, 0.0, c.z()),
+                        leg_r,
+                        y0,
+                        y1,
+                        id,
+                    );
+                    builder.cuboid(
+                        (c.x() - half_w, y1, c.z() - half_d),
+                        (c.x() + half_w, c.y() + height, c.z() + half_d),
+                        id,
+                    );
                 }
                 ObjectDef::Ground(mat) => {
                     builder.ground(lookup(mat)?);
