@@ -337,6 +337,31 @@ fn assemble(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
 ) -> wgpu::BindGroup {
+    if let Style::Interior {
+        wall_thickness,
+        height,
+        floor,
+        wall,
+        ceiling,
+        light,
+        column,
+    } = cfg.style
+    {
+        return assemble_interior(
+            cfg,
+            center,
+            device,
+            layout,
+            wall_thickness,
+            height,
+            floor,
+            wall,
+            ceiling,
+            light,
+            column,
+        );
+    }
+
     let mut spheres = collect_spheres(cfg, loaded, center);
 
     // Optional ground: one huge sphere centered under the loaded region, its
@@ -373,6 +398,90 @@ fn assemble(
         &grid.cell_ranges,
         &grid.sphere_indices,
     )
+}
+
+fn assemble_interior(
+    cfg: &WorldConfig,
+    center: ChunkCoord,
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    wall_thickness: f32,
+    height: f32,
+    floor: u32,
+    wall: u32,
+    ceiling: u32,
+    light: u32,
+    column: u32,
+) -> wgpu::BindGroup {
+    let mut builder = SceneBuilder::new();
+    builder.add_palette(&cfg.palette);
+    let r = cfg.view_radius;
+    let t = wall_thickness.max(0.05);
+    let half = cfg.chunk_size * 0.5;
+
+    for dz in -r..=r {
+        for dx in -r..=r {
+            let cx = center.0 + dx;
+            let cz = center.1 + dz;
+            let x0 = cx as f32 * cfg.chunk_size;
+            let x1 = x0 + cfg.chunk_size;
+            let z0 = cz as f32 * cfg.chunk_size;
+            let z1 = z0 + cfg.chunk_size;
+            let mx = (x0 + x1) * 0.5;
+            let mz = (z0 + z1) * 0.5;
+            let floor_id = MaterialId::from_index(floor);
+            let wall_id = MaterialId::from_index(wall);
+            let ceiling_id = MaterialId::from_index(ceiling);
+            let light_id = MaterialId::from_index(light);
+            let column_id = MaterialId::from_index(column);
+
+            builder.cuboid((x0, -t, z0), (x1, 0.0, z1), floor_id);
+            builder.cuboid((x0, height, z0), (x1, height + t, z1), ceiling_id);
+
+            // Side walls leave the z direction open, forming a continuous
+            // corridor through streamed chunks.
+            builder.cuboid((x0, 0.0, z0), (x0 + t, height, z1), wall_id);
+            builder.cuboid((x1 - t, 0.0, z0), (x1, height, z1), wall_id);
+
+            // Occasional cross-room wall panels create alcoves without blocking
+            // the main corridor.
+            if (cx + cz).rem_euclid(3) == 0 {
+                builder.cuboid(
+                    (mx - half * 0.70, 0.0, mz - t * 0.5),
+                    (mx - half * 0.22, height * 0.82, mz + t * 0.5),
+                    wall_id,
+                );
+                builder.cuboid(
+                    (mx + half * 0.22, 0.0, mz - t * 0.5),
+                    (mx + half * 0.70, height * 0.82, mz + t * 0.5),
+                    wall_id,
+                );
+            }
+
+            builder.cylinder(
+                (x0 + half * 0.28, 0.0, mz),
+                t * 0.75,
+                0.0,
+                height,
+                column_id,
+            );
+            builder.cylinder(
+                (x1 - half * 0.28, 0.0, mz),
+                t * 0.75,
+                0.0,
+                height,
+                column_id,
+            );
+
+            builder.cuboid(
+                (mx - half * 0.22, height - t * 1.5, mz - t * 0.8),
+                (mx + half * 0.22, height - t * 0.7, mz + t * 0.8),
+                light_id,
+            );
+        }
+    }
+
+    builder.build(device, layout)
 }
 
 #[cfg(test)]

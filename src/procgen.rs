@@ -162,6 +162,17 @@ pub enum Style {
         r: f32,
         mats: Vec<u32>,
     },
+    /// Endless interior corridor/room segments. Geometry is assembled directly
+    /// by the streaming world layer so it can use native boxes/cylinders.
+    Interior {
+        wall_thickness: f32,
+        height: f32,
+        floor: u32,
+        wall: u32,
+        ceiling: u32,
+        light: u32,
+        column: u32,
+    },
 }
 
 fn pick(rng: &mut Rng, mats: &[u32]) -> u32 {
@@ -284,6 +295,7 @@ pub fn generate_chunk(
                 });
             }
         }
+        Style::Interior { .. } => {}
     }
 
     out

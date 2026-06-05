@@ -598,6 +598,15 @@ enum BiomeDef {
         r: f32,
         mats: Vec<String>,
     },
+    Interior {
+        wall_thickness: f32,
+        height: f32,
+        floor: String,
+        wall: String,
+        ceiling: String,
+        light: String,
+        column: String,
+    },
 }
 
 impl WorldDef {
@@ -692,6 +701,33 @@ impl WorldDef {
                 y_hi: *y_hi,
                 r: *r,
                 mats: resolve(mats)?,
+            },
+            BiomeDef::Interior {
+                wall_thickness,
+                height,
+                floor,
+                wall,
+                ceiling,
+                light,
+                column,
+            } => Style::Interior {
+                wall_thickness: *wall_thickness,
+                height: *height,
+                floor: *index_of
+                    .get(floor)
+                    .ok_or_else(|| anyhow!("unknown interior floor material `{floor}`"))?,
+                wall: *index_of
+                    .get(wall)
+                    .ok_or_else(|| anyhow!("unknown interior wall material `{wall}`"))?,
+                ceiling: *index_of.get(ceiling).ok_or_else(|| {
+                    anyhow!("unknown interior ceiling material `{ceiling}`")
+                })?,
+                light: *index_of
+                    .get(light)
+                    .ok_or_else(|| anyhow!("unknown interior light material `{light}`"))?,
+                column: *index_of
+                    .get(column)
+                    .ok_or_else(|| anyhow!("unknown interior column material `{column}`"))?,
             },
         };
 

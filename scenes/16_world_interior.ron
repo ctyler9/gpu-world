@@ -1,0 +1,36 @@
+// Procedural streaming interior: endless connected corridor-room chunks built
+// from native boxes and cylinders. Auto-drift works well here.
+World((
+    title: "Interior World",
+    description: "An endless procedural corridor of rooms, columns, and warm ceiling lights.",
+    music: "dorian",
+    camera_mode: Drift,
+    world_seed: 20260605,
+    chunk_size: 6.0,
+    view_radius: 2,
+    max_spheres: 256,
+    sky: 0.0,
+    background: (0.0, 0.0, 0.0),
+    palette: {
+        "floor":   Opaque((0.08, 0.075, 0.070), 0.18),
+        "wall":    Lambertian((0.34, 0.32, 0.29)),
+        "ceiling": Lambertian((0.22, 0.22, 0.21)),
+        "lamp":    Emissive((1.0, 0.72, 0.42), 7.0),
+        "column":  Opaque((0.48, 0.44, 0.38), 0.08),
+    },
+    biome: Interior(
+        wall_thickness: 0.18,
+        height: 3.2,
+        floor: "floor",
+        wall: "wall",
+        ceiling: "ceiling",
+        light: "lamp",
+        column: "column",
+    ),
+    camera: LookAt(
+        eye: (0.0, 1.25, 2.6),
+        center: (0.0, 1.25, -3.2),
+        up: (0.0, 1.0, 0.0),
+        fov: 48.0,
+    ),
+))
