@@ -356,6 +356,24 @@ impl MusicSettingsUi {
                         self.interacted = true;
                     }
 
+                    let mut bass = self.controls.bass();
+                    if ui
+                        .add(egui::Slider::new(&mut bass, 0.0..=1.0).text("Bass"))
+                        .changed()
+                    {
+                        self.controls.set_bass(bass);
+                        self.interacted = true;
+                    }
+
+                    let mut shimmer = self.controls.shimmer();
+                    if ui
+                        .add(egui::Slider::new(&mut shimmer, 0.0..=1.0).text("Shimmer"))
+                        .changed()
+                    {
+                        self.controls.set_shimmer(shimmer);
+                        self.interacted = true;
+                    }
+
                     ui.separator();
                     ui.label("Performance");
 

@@ -46,6 +46,10 @@ struct Uniforms {
     height: u32,
     frame_count: u32,
     samples_per_frame: u32,
+    audio_energy: f32,
+    reactive_lights: f32,
+    _pad0: u32,
+    _pad1: u32,
 }
 
 #[derive(Copy, Clone, Pod, Zeroable)]
@@ -87,6 +91,10 @@ impl PathTracer {
             height,
             frame_count: 0,
             samples_per_frame: 1,
+            audio_energy: 0.0,
+            reactive_lights: 0.0,
+            _pad0: 0,
+            _pad1: 0,
         };
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("uniforms"),
@@ -185,6 +193,11 @@ impl PathTracer {
         self.post_uniforms.strength = strength.clamp(0.0, 1.0);
         self.post_uniforms.radius = radius.clamp(0.5, 2.0);
         self.post_uniforms.edge_threshold = edge_threshold.clamp(0.02, 1.0);
+    }
+
+    pub fn set_audio_reactivity(&mut self, energy: f32, reactive_lights: f32) {
+        self.uniforms.audio_energy = energy.clamp(0.0, 1.0);
+        self.uniforms.reactive_lights = reactive_lights.clamp(0.0, 1.0);
     }
 
     pub fn set_render_scale(&mut self, scale: f32) {

@@ -282,6 +282,10 @@ async fn main() -> Result<()> {
                         }
 
                         let performance = music_ui.performance_settings();
+                        renderer.set_audio_reactivity(
+                            audio_controls.energy(),
+                            gallery.current_metadata().reactive_lights,
+                        );
                         let ui_active = music_ui.panel_open() || music_ui.captures_pointer();
                         let waiting_for_full_quality =
                             now.duration_since(last_interaction).as_secs_f32()

@@ -6,6 +6,7 @@ World((
     description: "A streaming cloud of floating emissive forms.",
     music: "lydian",
     camera_mode: Drift,
+    reactive_lights: 0.16,
     world_seed: 31337,
     chunk_size: 8.0,
     view_radius: 3,

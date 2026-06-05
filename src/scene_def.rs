@@ -64,6 +64,7 @@ pub struct SceneMetadata {
     pub description: String,
     pub music: Option<AudioMode>,
     pub camera_mode: Option<CameraMode>,
+    pub reactive_lights: f32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,6 +77,8 @@ pub struct SceneDef {
     music: Option<AudioMode>,
     #[serde(default)]
     camera_mode: Option<CameraMode>,
+    #[serde(default)]
+    reactive_lights: f32,
     /// Named materials, referenced by the objects below.
     materials: HashMap<String, MaterialDef>,
     /// The things in the scene, placed in order.
@@ -308,6 +311,7 @@ impl SceneDef {
             description: self.description.clone(),
             music: self.music,
             camera_mode: self.camera_mode,
+            reactive_lights: self.reactive_lights,
         }
     }
 
@@ -532,6 +536,8 @@ pub struct WorldDef {
     music: Option<AudioMode>,
     #[serde(default)]
     camera_mode: Option<CameraMode>,
+    #[serde(default)]
+    reactive_lights: f32,
     world_seed: u64,
     chunk_size: f32,
     /// Chebyshev radius, in chunks, of the loaded region.
@@ -624,6 +630,7 @@ impl WorldDef {
             description: self.description.clone(),
             music: self.music,
             camera_mode: self.camera_mode,
+            reactive_lights: self.reactive_lights,
         }
     }
 

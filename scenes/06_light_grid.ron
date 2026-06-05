@@ -6,6 +6,7 @@
     description: "A checker of cyan lamps and mirror balls over a glossy dark floor.",
     music: "mixolydian",
     camera_mode: Path,
+    reactive_lights: 0.12,
     materials: {
         "lamp":   Emissive((0.4, 0.9, 1.0), 5.0),
         "mirror": Metal((0.9, 0.9, 0.95)),

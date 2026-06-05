@@ -125,6 +125,9 @@ struct AudioControlsInner {
     volume: AtomicU32,
     arpeggio: AtomicU32,
     warmth: AtomicU32,
+    bass: AtomicU32,
+    shimmer: AtomicU32,
+    energy: AtomicU32,
 }
 
 impl AudioControls {
@@ -136,6 +139,9 @@ impl AudioControls {
                 volume: AtomicU32::new(1.0_f32.to_bits()),
                 arpeggio: AtomicU32::new(1.0_f32.to_bits()),
                 warmth: AtomicU32::new(0.65_f32.to_bits()),
+                bass: AtomicU32::new(0.0_f32.to_bits()),
+                shimmer: AtomicU32::new(0.0_f32.to_bits()),
+                energy: AtomicU32::new(0.0_f32.to_bits()),
             }),
         }
     }
@@ -197,6 +203,36 @@ impl AudioControls {
     pub fn set_warmth(&self, value: f32) {
         self.inner
             .warmth
+            .store(value.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn bass(&self) -> f32 {
+        f32::from_bits(self.inner.bass.load(Ordering::Relaxed))
+    }
+
+    pub fn set_bass(&self, value: f32) {
+        self.inner
+            .bass
+            .store(value.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn shimmer(&self) -> f32 {
+        f32::from_bits(self.inner.shimmer.load(Ordering::Relaxed))
+    }
+
+    pub fn set_shimmer(&self, value: f32) {
+        self.inner
+            .shimmer
+            .store(value.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn energy(&self) -> f32 {
+        f32::from_bits(self.inner.energy.load(Ordering::Relaxed))
+    }
+
+    fn set_energy(&self, value: f32) {
+        self.inner
+            .energy
             .store(value.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
     }
 }
@@ -293,6 +329,8 @@ struct AmbientSynth {
     lfo_phase: f32,
     pan_phase: f32,
     arp_phase: f32,
+    bass_phase: f32,
+    shimmer_phase: f32,
     arp_frequency: f32,
     arp_envelope: f32,
     chord_envelope: f32,
@@ -321,6 +359,8 @@ impl AmbientSynth {
             lfo_phase: 0.0,
             pan_phase: 0.0,
             arp_phase: 0.0,
+            bass_phase: 0.0,
+            shimmer_phase: 0.0,
             arp_frequency: 0.0,
             arp_envelope: 0.0,
             chord_envelope: 0.0,
@@ -387,6 +427,11 @@ impl AmbientSynth {
         self.pan_phase = wrap_phase(self.pan_phase + TAU * 0.007 / self.sample_rate);
         self.arp_phase =
             wrap_phase(self.arp_phase + TAU * self.arp_frequency / self.sample_rate);
+        self.bass_phase =
+            wrap_phase(self.bass_phase + TAU * self.frequencies[0] * 0.5 / self.sample_rate);
+        self.shimmer_phase = wrap_phase(
+            self.shimmer_phase + TAU * self.frequencies[5] * 2.0 / self.sample_rate,
+        );
         self.arp_envelope *= 0.99993;
         self.chord_envelope =
             (self.chord_envelope + 1.0 / (self.sample_rate * 5.0)).min(1.0);
@@ -403,15 +448,22 @@ impl AmbientSynth {
         let pad = ((current_pad + previous_pad) * breathe * attack).tanh() * 0.34;
         let arp =
             self.arp_phase.sin() * self.arp_envelope * 0.014 * self.controls.arpeggio();
+        let bass = self.bass_phase.sin() * 0.028 * self.controls.bass() * attack;
+        let shimmer =
+            self.shimmer_phase.sin() * self.arp_envelope * 0.006 * self.controls.shimmer();
         let pan = self.pan_phase.sin() * 0.07;
         let arp_pan = -pan * 0.30;
 
-        let left = pad * (0.80 - pan) + arp * (0.68 - arp_pan);
-        let right = pad * (0.80 + pan) + arp * (0.68 + arp_pan);
+        let left = pad * (0.80 - pan) + arp * (0.68 - arp_pan) + bass + shimmer * 0.55;
+        let right = pad * (0.80 + pan) + arp * (0.68 + arp_pan) + bass - shimmer * 0.55;
 
         let smooth = 0.095 - warmth * 0.05;
         self.lowpass_left += (left - self.lowpass_left) * smooth;
         self.lowpass_right += (right - self.lowpass_right) * smooth;
+
+        let energy = (self.arp_envelope * 0.8 + smoothstep(self.chord_envelope) * 0.2)
+            .clamp(0.0, 1.0);
+        self.controls.set_energy(energy);
 
         let volume = self.controls.volume() * OUTPUT_GAIN;
         (self.lowpass_left * volume, self.lowpass_right * volume)

@@ -5,6 +5,7 @@ World((
     description: "An endless procedural corridor of rooms, columns, and warm ceiling lights.",
     music: "dorian",
     camera_mode: Drift,
+    reactive_lights: 0.10,
     world_seed: 20260605,
     chunk_size: 6.0,
     view_radius: 2,

@@ -6,6 +6,7 @@
     description: "A glossy dark interior with cyan and magenta wall lights.",
     music: "lydian",
     camera_mode: Path,
+    reactive_lights: 0.14,
     materials: {
         "floor":    Opaque((0.015, 0.025, 0.034), 0.42),
         "wall":     Lambertian((0.045, 0.050, 0.070)),
