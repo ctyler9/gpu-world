@@ -239,20 +239,40 @@ async fn main() -> Result<()> {
                         let waiting_for_full_quality =
                             now.duration_since(last_interaction).as_secs_f32()
                                 < performance.full_quality_delay;
-                        let render_scale = if performance.dynamic_resolution
-                            && (ui_active || waiting_for_full_quality)
-                        {
-                            performance.interactive_scale
-                        } else {
-                            1.0
-                        };
+                        let interactive_preview = ui_active || waiting_for_full_quality;
+                        let render_scale =
+                            if performance.dynamic_resolution && interactive_preview {
+                                performance.interactive_scale
+                            } else {
+                                1.0
+                            };
                         renderer.set_render_scale(render_scale);
-                        let samples_per_frame = if ui_active || waiting_for_full_quality {
-                            performance.interactive_samples
+
+                        let (
+                            interactive_samples,
+                            post_strength,
+                            post_radius,
+                            edge_threshold,
+                        ) = match performance.motion_quality {
+                            ui::MotionQuality::Fast => (2, 0.18, 1.0, 0.20),
+                            ui::MotionQuality::Balanced => (4, 0.34, 1.0, 0.16),
+                            ui::MotionQuality::Pretty => (6, 0.48, 1.25, 0.13),
+                        };
+                        let samples_per_frame = if interactive_preview {
+                            interactive_samples
                         } else {
                             1
                         };
                         renderer.set_samples_per_frame(samples_per_frame);
+                        renderer.set_post_filter(
+                            if interactive_preview {
+                                post_strength
+                            } else {
+                                0.0
+                            },
+                            post_radius,
+                            edge_threshold,
+                        );
 
                         let frame = match surface.get_current_texture() {
                             wgpu::CurrentSurfaceTexture::Success(frame)

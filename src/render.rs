@@ -12,6 +12,8 @@ pub struct PathTracer {
 
     uniforms: Uniforms,
     uniform_buffer: wgpu::Buffer,
+    post_uniforms: PostUniforms,
+    post_uniform_buffer: wgpu::Buffer,
 
     window_width: u32,
     window_height: u32,
@@ -41,6 +43,19 @@ struct Uniforms {
     height: u32,
     frame_count: u32,
     samples_per_frame: u32,
+}
+
+#[derive(Copy, Clone, Pod, Zeroable)]
+#[repr(C)]
+struct PostUniforms {
+    width: u32,
+    height: u32,
+    strength: f32,
+    radius: f32,
+    edge_threshold: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 }
 
 impl PathTracer {
@@ -76,6 +91,22 @@ impl PathTracer {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let post_uniforms = PostUniforms {
+            width,
+            height,
+            strength: 0.0,
+            radius: 1.0,
+            edge_threshold: 0.16,
+            _pad0: 0.0,
+            _pad1: 0.0,
+            _pad2: 0.0,
+        };
+        let post_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("post uniforms"),
+            size: std::mem::size_of::<PostUniforms>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
 
         let radiance_samples = create_sample_textures(&device, width, height);
         let (output_texture, output_view) =
@@ -91,6 +122,7 @@ impl PathTracer {
             &upscale_bind_group_layout,
             &output_view,
             &upscale_sampler,
+            &post_uniform_buffer,
         );
         let render_bind_groups = create_render_bind_groups(
             &device,
@@ -104,6 +136,8 @@ impl PathTracer {
             queue,
             uniforms,
             uniform_buffer,
+            post_uniforms,
+            post_uniform_buffer,
             window_width: width,
             window_height: height,
             surface_format,
@@ -144,6 +178,12 @@ impl PathTracer {
         self.uniforms.samples_per_frame = samples.clamp(1, 8);
     }
 
+    pub fn set_post_filter(&mut self, strength: f32, radius: f32, edge_threshold: f32) {
+        self.post_uniforms.strength = strength.clamp(0.0, 1.0);
+        self.post_uniforms.radius = radius.clamp(0.5, 2.0);
+        self.post_uniforms.edge_threshold = edge_threshold.clamp(0.02, 1.0);
+    }
+
     pub fn set_render_scale(&mut self, scale: f32) {
         let scale = scale.clamp(0.1, 1.0);
         let render_width = ((self.window_width as f32 * scale).round() as u32).max(1);
@@ -157,6 +197,8 @@ impl PathTracer {
         self.render_height = render_height;
         self.uniforms.width = render_width;
         self.uniforms.height = render_height;
+        self.post_uniforms.width = render_width;
+        self.post_uniforms.height = render_height;
         self.reset_samples();
 
         self.radiance_samples =
@@ -180,6 +222,7 @@ impl PathTracer {
             &self.upscale_bind_group_layout,
             &self.output_view,
             &self.upscale_sampler,
+            &self.post_uniform_buffer,
         );
     }
 
@@ -194,6 +237,11 @@ impl PathTracer {
         self.uniforms.frame_count += 1;
         self.queue
             .write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&self.uniforms));
+        self.queue.write_buffer(
+            &self.post_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&self.post_uniforms),
+        );
 
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("path tracer render pass"),
@@ -255,6 +303,19 @@ fn compile_upscale_shader_module(device: &wgpu::Device) -> wgpu::ShaderModule {
 @group(0) @binding(0) var source_texture: texture_2d<f32>;
 @group(0) @binding(1) var source_sampler: sampler;
 
+struct PostUniforms {
+  width: u32,
+  height: u32,
+  strength: f32,
+  radius: f32,
+  edge_threshold: f32,
+  _pad0: f32,
+  _pad1: f32,
+  _pad2: f32,
+}
+
+@group(0) @binding(2) var<uniform> post: PostUniforms;
+
 struct VertexOut {
   @builtin(position) position: vec4f,
   @location(0) uv: vec2f,
@@ -278,8 +339,53 @@ var<private> vertices: TriangleVertices = TriangleVertices(
   return out;
 }
 
+fn luminance(color: vec3f) -> f32 {
+  return dot(color, vec3f(0.2126, 0.7152, 0.0722));
+}
+
+fn neighbor_weight(center: vec3f, sample_color: vec3f, base_weight: f32) -> f32 {
+  let luma_delta = abs(luminance(center) - luminance(sample_color));
+  let edge = exp(-luma_delta / max(post.edge_threshold, 0.001));
+  return base_weight * edge;
+}
+
+fn denoise(uv: vec2f) -> vec3f {
+  let center = textureSample(source_texture, source_sampler, uv).rgb;
+  if post.strength <= 0.001 {
+    return center;
+  }
+
+  let texel = vec2f(1.0 / f32(post.width), 1.0 / f32(post.height)) * post.radius;
+  var sum = center;
+  var total = 1.0;
+
+  let c0 = textureSample(source_texture, source_sampler, uv + vec2f( texel.x, 0.0)).rgb;
+  let c1 = textureSample(source_texture, source_sampler, uv + vec2f(-texel.x, 0.0)).rgb;
+  let c2 = textureSample(source_texture, source_sampler, uv + vec2f(0.0,  texel.y)).rgb;
+  let c3 = textureSample(source_texture, source_sampler, uv + vec2f(0.0, -texel.y)).rgb;
+  let c4 = textureSample(source_texture, source_sampler, uv + vec2f( texel.x,  texel.y)).rgb;
+  let c5 = textureSample(source_texture, source_sampler, uv + vec2f(-texel.x,  texel.y)).rgb;
+  let c6 = textureSample(source_texture, source_sampler, uv + vec2f( texel.x, -texel.y)).rgb;
+  let c7 = textureSample(source_texture, source_sampler, uv + vec2f(-texel.x, -texel.y)).rgb;
+
+  let w0 = neighbor_weight(center, c0, 0.70);
+  let w1 = neighbor_weight(center, c1, 0.70);
+  let w2 = neighbor_weight(center, c2, 0.70);
+  let w3 = neighbor_weight(center, c3, 0.70);
+  let w4 = neighbor_weight(center, c4, 0.38);
+  let w5 = neighbor_weight(center, c5, 0.38);
+  let w6 = neighbor_weight(center, c6, 0.38);
+  let w7 = neighbor_weight(center, c7, 0.38);
+
+  sum += c0 * w0 + c1 * w1 + c2 * w2 + c3 * w3;
+  sum += c4 * w4 + c5 * w5 + c6 * w6 + c7 * w7;
+  total += w0 + w1 + w2 + w3 + w4 + w5 + w6 + w7;
+
+  return mix(center, sum / total, post.strength);
+}
+
 @fragment fn upscale_fs(in: VertexOut) -> @location(0) vec4f {
-  return textureSample(source_texture, source_sampler, in.uv);
+  return vec4f(denoise(in.uv), 1.0);
 }
 "#;
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -467,6 +573,16 @@ fn create_upscale_pipeline(
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -510,6 +626,7 @@ fn create_upscale_bind_group(
     layout: &wgpu::BindGroupLayout,
     source_view: &wgpu::TextureView,
     sampler: &wgpu::Sampler,
+    post_uniform_buffer: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("upscale bind group"),
@@ -522,6 +639,14 @@ fn create_upscale_bind_group(
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: post_uniform_buffer,
+                    offset: 0,
+                    size: None,
+                }),
             },
         ],
     })

@@ -1,10 +1,31 @@
 use crate::audio::{AudioControls, AudioMode};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MotionQuality {
+    Fast,
+    Balanced,
+    Pretty,
+}
+
+impl MotionQuality {
+    pub fn all() -> &'static [Self] {
+        &[Self::Fast, Self::Balanced, Self::Pretty]
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Fast => "Fast",
+            Self::Balanced => "Balanced",
+            Self::Pretty => "Pretty",
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct PerformanceSettings {
     pub dynamic_resolution: bool,
     pub interactive_scale: f32,
-    pub interactive_samples: u32,
+    pub motion_quality: MotionQuality,
     pub full_quality_delay: f32,
 }
 
@@ -13,7 +34,7 @@ impl Default for PerformanceSettings {
         Self {
             dynamic_resolution: false,
             interactive_scale: 0.5,
-            interactive_samples: 4,
+            motion_quality: MotionQuality::Balanced,
             full_quality_delay: 0.5,
         }
     }
@@ -216,6 +237,23 @@ impl MusicSettingsUi {
                     ui.separator();
                     ui.label("Performance");
 
+                    let mut motion_quality = self.performance.motion_quality;
+                    egui::ComboBox::from_label("Motion quality")
+                        .selected_text(motion_quality.label())
+                        .show_ui(ui, |ui| {
+                            for &candidate in MotionQuality::all() {
+                                ui.selectable_value(
+                                    &mut motion_quality,
+                                    candidate,
+                                    candidate.label(),
+                                );
+                            }
+                        });
+                    if motion_quality != self.performance.motion_quality {
+                        self.performance.motion_quality = motion_quality;
+                        self.interacted = true;
+                    }
+
                     if ui
                         .checkbox(
                             &mut self.performance.dynamic_resolution,
@@ -226,28 +264,16 @@ impl MusicSettingsUi {
                         self.interacted = true;
                     }
 
-                    if ui
-                        .add(
-                            egui::Slider::new(
-                                &mut self.performance.interactive_scale,
-                                0.35..=1.0,
+                    if self.performance.dynamic_resolution
+                        && ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut self.performance.interactive_scale,
+                                    0.35..=1.0,
+                                )
+                                .text("Interactive scale"),
                             )
-                            .text("Interactive scale"),
-                        )
-                        .changed()
-                    {
-                        self.interacted = true;
-                    }
-
-                    if ui
-                        .add(
-                            egui::Slider::new(
-                                &mut self.performance.interactive_samples,
-                                1..=8,
-                            )
-                            .text("Moving samples"),
-                        )
-                        .changed()
+                            .changed()
                     {
                         self.interacted = true;
                     }
@@ -258,7 +284,7 @@ impl MusicSettingsUi {
                                 &mut self.performance.full_quality_delay,
                                 0.0..=2.0,
                             )
-                            .text("Full-quality delay"),
+                            .text("Settle delay"),
                         )
                         .changed()
                     {
