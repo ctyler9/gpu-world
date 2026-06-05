@@ -25,6 +25,7 @@ const HEIGHT: u32 = 1200;
 
 #[pollster::main]
 async fn main() -> Result<()> {
+    let audio_mode = parse_audio_mode()?;
     let event_loop = EventLoop::new()?;
     let window_size = winit::dpi::PhysicalSize::new(WIDTH, HEIGHT);
     let window = WindowBuilder::new()
@@ -40,7 +41,7 @@ async fn main() -> Result<()> {
 
     // Start the ambient soundtrack. Keep the stream alive for the whole run
     // (dropping it stops playback); a missing audio device is non-fatal.
-    let _audio_stream = match audio::start() {
+    let _audio_stream = match audio::start(audio_mode) {
         Ok(stream) => Some(stream),
         Err(e) => {
             eprintln!("audio disabled: {e:#}");
@@ -244,6 +245,40 @@ async fn main() -> Result<()> {
         }
     })?;
     Ok(())
+}
+
+fn parse_audio_mode() -> Result<audio::AudioMode> {
+    let mut args = std::env::args().skip(1);
+    let mut audio_mode = audio::AudioMode::Auto;
+
+    while let Some(arg) = args.next() {
+        let value = if let Some(value) = arg.strip_prefix("--audio-mode=") {
+            Some(value.to_string())
+        } else if let Some(value) = arg.strip_prefix("--mode=") {
+            Some(value.to_string())
+        } else if arg == "--audio-mode" || arg == "--mode" {
+            Some(
+                args.next()
+                    .context("--audio-mode requires one of: auto, dorian, lydian, aeolian, mixolydian, ionian")?,
+            )
+        } else {
+            anyhow::bail!(
+                "unknown argument {arg:?}; use --audio-mode <{}>",
+                audio::AudioMode::names()
+            );
+        };
+
+        if let Some(value) = value {
+            audio_mode = audio::AudioMode::parse(&value).with_context(|| {
+                format!(
+                    "unknown audio mode {value:?}; use one of: {}",
+                    audio::AudioMode::names()
+                )
+            })?;
+        }
+    }
+
+    Ok(audio_mode)
 }
 
 async fn connect_to_gpu(

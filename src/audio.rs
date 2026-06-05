@@ -9,10 +9,38 @@ use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample};
 
+#[derive(Clone, Copy, Debug)]
+pub enum AudioMode {
+    Auto,
+    Dorian,
+    Lydian,
+    Aeolian,
+    Mixolydian,
+    Ionian,
+}
+
+impl AudioMode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.to_ascii_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
+            "dorian" => Some(Self::Dorian),
+            "lydian" => Some(Self::Lydian),
+            "aeolian" | "minor" => Some(Self::Aeolian),
+            "mixolydian" => Some(Self::Mixolydian),
+            "ionian" | "major" => Some(Self::Ionian),
+            _ => None,
+        }
+    }
+
+    pub fn names() -> &'static str {
+        "auto, dorian, lydian, aeolian, mixolydian, ionian"
+    }
+}
+
 /// Start the ambient soundtrack on the default output device. The returned
 /// [`cpal::Stream`] must be kept alive for audio to keep playing — drop it to
 /// stop.
-pub fn start() -> Result<cpal::Stream> {
+pub fn start(mode: AudioMode) -> Result<cpal::Stream> {
     let host = cpal::default_host();
     let device = output_device(&host)?;
     let device_name = device.name().unwrap_or_else(|_| "unknown".to_string());
@@ -24,9 +52,9 @@ pub fn start() -> Result<cpal::Stream> {
         config.channels()
     );
     match config.sample_format() {
-        cpal::SampleFormat::F32 => run::<f32>(&device, &config.into()),
-        cpal::SampleFormat::I16 => run::<i16>(&device, &config.into()),
-        cpal::SampleFormat::U16 => run::<u16>(&device, &config.into()),
+        cpal::SampleFormat::F32 => run::<f32>(&device, &config.into(), mode),
+        cpal::SampleFormat::I16 => run::<i16>(&device, &config.into(), mode),
+        cpal::SampleFormat::U16 => run::<u16>(&device, &config.into(), mode),
         other => anyhow::bail!("unsupported sample format: {other:?}"),
     }
 }
@@ -54,12 +82,16 @@ fn output_device(host: &cpal::Host) -> Result<cpal::Device> {
 }
 
 /// Build the synth and wire it to a cpal output stream of sample type `T`.
-fn run<T>(device: &cpal::Device, config: &cpal::StreamConfig) -> Result<cpal::Stream>
+fn run<T>(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    mode: AudioMode,
+) -> Result<cpal::Stream>
 where
     T: SizedSample + FromSample<f32>,
 {
     let channels = config.channels as usize;
-    let mut synth = AmbientSynth::new(config.sample_rate.0 as f32);
+    let mut synth = AmbientSynth::new(config.sample_rate.0 as f32, mode);
 
     let stream = device.build_output_stream(
         config,
@@ -82,16 +114,22 @@ where
 }
 
 struct AmbientSynth {
+    mode: AudioMode,
     sample_rate: f32,
     phases: [f32; 6],
     detune_phases: [f32; 6],
     frequencies: [f32; 6],
+    previous_phases: [f32; 6],
+    previous_detune_phases: [f32; 6],
+    previous_frequencies: [f32; 6],
     target_frequencies: [f32; 6],
     lfo_phase: f32,
     pan_phase: f32,
     arp_phase: f32,
     arp_frequency: f32,
     arp_envelope: f32,
+    chord_envelope: f32,
+    previous_chord_envelope: f32,
     lowpass_left: f32,
     lowpass_right: f32,
     current_chord: u64,
@@ -100,18 +138,24 @@ struct AmbientSynth {
 }
 
 impl AmbientSynth {
-    fn new(sample_rate: f32) -> Self {
+    fn new(sample_rate: f32, mode: AudioMode) -> Self {
         let mut synth = Self {
+            mode,
             sample_rate,
             phases: [0.0; 6],
             detune_phases: [0.0; 6],
             frequencies: [0.0; 6],
+            previous_phases: [0.0; 6],
+            previous_detune_phases: [0.0; 6],
+            previous_frequencies: [0.0; 6],
             target_frequencies: [0.0; 6],
             lfo_phase: 0.0,
             pan_phase: 0.0,
             arp_phase: 0.0,
             arp_frequency: 0.0,
             arp_envelope: 0.0,
+            chord_envelope: 0.0,
+            previous_chord_envelope: 0.0,
             lowpass_left: 0.0,
             lowpass_right: 0.0,
             current_chord: u64::MAX,
@@ -129,10 +173,9 @@ impl AmbientSynth {
 
         self.update_harmony();
 
-        let mut mono = 0.0;
+        let mut current_mono = 0.0;
+        let mut previous_mono = 0.0;
         for (index, gain) in GAINS.iter().enumerate() {
-            self.frequencies[index] +=
-                (self.target_frequencies[index] - self.frequencies[index]) * 0.000014;
             self.phases[index] = wrap_phase(
                 self.phases[index] + TAU * self.frequencies[index] / self.sample_rate,
             );
@@ -145,7 +188,21 @@ impl AmbientSynth {
             let voice_lfo = (self.lfo_phase + index as f32 * 0.73).sin() * 0.08 + 0.92;
             let voice =
                 self.phases[index].sin() * 0.74 + self.detune_phases[index].sin() * 0.26;
-            mono += voice * gain * voice_lfo;
+            current_mono += voice * gain * voice_lfo;
+
+            if self.previous_chord_envelope > 0.0 {
+                self.previous_phases[index] = wrap_phase(
+                    self.previous_phases[index]
+                        + TAU * self.previous_frequencies[index] / self.sample_rate,
+                );
+                self.previous_detune_phases[index] = wrap_phase(
+                    self.previous_detune_phases[index]
+                        + TAU * self.previous_frequencies[index] * detune / self.sample_rate,
+                );
+                let previous_voice = self.previous_phases[index].sin() * 0.74
+                    + self.previous_detune_phases[index].sin() * 0.26;
+                previous_mono += previous_voice * gain * voice_lfo;
+            }
         }
 
         self.lfo_phase = wrap_phase(self.lfo_phase + TAU * 0.024 / self.sample_rate);
@@ -153,14 +210,20 @@ impl AmbientSynth {
         self.arp_phase =
             wrap_phase(self.arp_phase + TAU * self.arp_frequency / self.sample_rate);
         self.arp_envelope *= 0.99993;
+        self.chord_envelope =
+            (self.chord_envelope + 1.0 / (self.sample_rate * 5.0)).min(1.0);
+        self.previous_chord_envelope =
+            (self.previous_chord_envelope - 1.0 / (self.sample_rate * 5.0)).max(0.0);
 
         let breathe = 0.58 + 0.09 * self.lfo_phase.sin();
         let attack_samples = self.sample_rate * 4.0;
         let attack = (self.sample_index as f32 / attack_samples).min(1.0);
         self.sample_index += 1;
 
-        let pad = (mono * breathe * attack).tanh() * 0.36;
-        let arp = self.arp_phase.sin() * self.arp_envelope * 0.007;
+        let current_pad = current_mono * smoothstep(self.chord_envelope);
+        let previous_pad = previous_mono * smoothstep(self.previous_chord_envelope);
+        let pad = ((current_pad + previous_pad) * breathe * attack).tanh() * 0.34;
+        let arp = self.arp_phase.sin() * self.arp_envelope * 0.014;
         let pan = self.pan_phase.sin() * 0.07;
         let arp_pan = -pan * 0.30;
 
@@ -175,7 +238,7 @@ impl AmbientSynth {
 
     fn update_harmony(&mut self) {
         const CHORD_SECONDS: f32 = 12.0;
-        const ARP_SECONDS: f32 = 3.0;
+        const ARP_SECONDS: f32 = 2.25;
 
         let chord_samples = (self.sample_rate * CHORD_SECONDS) as u64;
         let arp_samples = (self.sample_rate * ARP_SECONDS) as u64;
@@ -183,8 +246,9 @@ impl AmbientSynth {
         let arp_step = self.sample_index / arp_samples;
 
         if chord != self.current_chord {
+            let had_previous_chord = self.current_chord != u64::MAX;
             self.current_chord = chord;
-            let mode = current_mode(chord);
+            let mode = current_mode(chord, self.mode);
             let progression_index = (chord as usize) % mode.progression.len();
             let degree = mode.progression[progression_index];
             let root = scale_midi(mode.root_midi, mode.scale, degree, -2);
@@ -201,11 +265,20 @@ impl AmbientSynth {
                 midi_to_hz(seventh),
                 midi_to_hz(ninth),
             ];
+            if had_previous_chord {
+                self.previous_phases = self.phases;
+                self.previous_detune_phases = self.detune_phases;
+                self.previous_frequencies = self.frequencies;
+                self.previous_chord_envelope = 1.0;
+            }
+            self.frequencies = self.target_frequencies;
+            self.chord_envelope = 0.0;
+            self.arp_envelope = 0.0;
         }
 
         if arp_step != self.current_arp_step {
             self.current_arp_step = arp_step;
-            let mode = current_mode(chord);
+            let mode = current_mode(chord, self.mode);
             let progression_index = (chord as usize) % mode.progression.len();
             let degree = mode.progression[progression_index];
             let pattern = [0, 2, 4, 2, 6, 4, 2, 0];
@@ -216,7 +289,7 @@ impl AmbientSynth {
                 0,
             );
             self.arp_frequency = midi_to_hz(note);
-            self.arp_envelope = 0.32;
+            self.arp_envelope = 0.48;
         }
     }
 }
@@ -227,7 +300,7 @@ struct ModeProgression {
     progression: [usize; 8],
 }
 
-fn current_mode(chord: u64) -> &'static ModeProgression {
+fn current_mode(chord: u64, mode: AudioMode) -> &'static ModeProgression {
     const IONIAN: [i32; 7] = [0, 2, 4, 5, 7, 9, 11];
     const DORIAN: [i32; 7] = [0, 2, 3, 5, 7, 9, 10];
     const LYDIAN: [i32; 7] = [0, 2, 4, 6, 7, 9, 11];
@@ -262,7 +335,14 @@ fn current_mode(chord: u64) -> &'static ModeProgression {
         },
     ];
 
-    &MODES[((chord / 8) as usize) % MODES.len()]
+    match mode {
+        AudioMode::Auto => &MODES[((chord / 8) as usize) % MODES.len()],
+        AudioMode::Dorian => &MODES[0],
+        AudioMode::Lydian => &MODES[1],
+        AudioMode::Aeolian => &MODES[2],
+        AudioMode::Mixolydian => &MODES[3],
+        AudioMode::Ionian => &MODES[4],
+    }
 }
 
 fn scale_midi(root_midi: i32, scale: [i32; 7], degree: usize, octave_offset: i32) -> i32 {
@@ -272,6 +352,11 @@ fn scale_midi(root_midi: i32, scale: [i32; 7], degree: usize, octave_offset: i32
 
 fn midi_to_hz(note: i32) -> f32 {
     440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0)
+}
+
+fn smoothstep(value: f32) -> f32 {
+    let value = value.clamp(0.0, 1.0);
+    value * value * (3.0 - 2.0 * value)
 }
 
 fn wrap_phase(phase: f32) -> f32 {
