@@ -11,6 +11,7 @@ use {
 };
 
 mod algebra;
+mod audio;
 mod camera;
 mod gallery;
 mod procgen;
@@ -36,6 +37,16 @@ async fn main() -> Result<()> {
     let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT, surface_format);
     let mut gallery =
         gallery::Gallery::new(renderer.device(), renderer.scene_group_layout());
+
+    // Start the ambient soundtrack. Keep the stream alive for the whole run
+    // (dropping it stops playback); a missing audio device is non-fatal.
+    let _audio_stream = match audio::start() {
+        Ok(stream) => Some(stream),
+        Err(e) => {
+            eprintln!("audio disabled: {e:#}");
+            None
+        }
+    };
 
     let mut left_mouse_button_pressed = false;
     let mut right_mouse_button_pressed = false;
