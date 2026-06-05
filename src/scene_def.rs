@@ -15,6 +15,7 @@ use serde::Deserialize;
 
 use crate::{
     algebra::Vec3,
+    audio::AudioMode,
     camera::{Camera, CameraKeyframe, CameraPath},
     procgen::Style,
     scene::{Material, SceneBuilder},
@@ -40,8 +41,41 @@ fn yes() -> bool {
     true
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+pub enum CameraMode {
+    Manual,
+    Path,
+    Drift,
+}
+
+impl CameraMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Manual => "manual",
+            Self::Path => "path",
+            Self::Drift => "drift",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SceneMetadata {
+    pub title: Option<String>,
+    pub description: String,
+    pub music: Option<AudioMode>,
+    pub camera_mode: Option<CameraMode>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SceneDef {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    music: Option<AudioMode>,
+    #[serde(default)]
+    camera_mode: Option<CameraMode>,
     /// Named materials, referenced by the objects below.
     materials: HashMap<String, MaterialDef>,
     /// The things in the scene, placed in order.
@@ -236,6 +270,15 @@ impl SceneDef {
             .context("failed to parse scene RON")
     }
 
+    pub fn metadata(&self) -> SceneMetadata {
+        SceneMetadata {
+            title: self.title.clone(),
+            description: self.description.clone(),
+            music: self.music,
+            camera_mode: self.camera_mode,
+        }
+    }
+
     /// Lower this definition into the renderer-facing pieces, reusing the
     /// procedural [`SceneBuilder`] helpers for grids and rings.
     pub fn build(&self) -> Result<(Camera, Option<CameraPath>, SceneBuilder)> {
@@ -394,6 +437,14 @@ enum WorldWrapper {
 
 #[derive(Debug, Deserialize)]
 pub struct WorldDef {
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    music: Option<AudioMode>,
+    #[serde(default)]
+    camera_mode: Option<CameraMode>,
     world_seed: u64,
     chunk_size: f32,
     /// Chebyshev radius, in chunks, of the loaded region.
@@ -469,6 +520,15 @@ impl WorldDef {
             .from_str(text)
             .context("failed to parse world RON")?;
         Ok(def)
+    }
+
+    pub fn metadata(&self) -> SceneMetadata {
+        SceneMetadata {
+            title: self.title.clone(),
+            description: self.description.clone(),
+            music: self.music,
+            camera_mode: self.camera_mode,
+        }
     }
 
     /// Device-free lowering into a renderer-ready [`WorldConfig`] plus the spawn

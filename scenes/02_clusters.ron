@@ -2,6 +2,10 @@
 // sphere, a tiny glass bead floating above it, and a metal sphere pulled inward
 // toward the center (inset: 0.3125). This is the `Ring` generator's sweet spot.
 (
+    title: "Sphere Clusters",
+    description: "Procedural clusters arranged across a simple ground plane.",
+    music: "dorian",
+    camera_mode: Path,
     materials: {
         "blue":   Opaque((0.0, 0.2, 0.9), 0.001),
         "metal":  Metal((0.8, 0.3, 0.3)),

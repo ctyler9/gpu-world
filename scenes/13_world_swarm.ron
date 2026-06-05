@@ -2,6 +2,10 @@
 // varied colors — a drifting nebula. Fly up into the cloud. The dark background
 // (sky: 0.0) makes the glowing orbs pop; no ground.
 World((
+    title: "Swarm World",
+    description: "A streaming cloud of floating emissive forms.",
+    music: "lydian",
+    camera_mode: Drift,
     world_seed: 31337,
     chunk_size: 8.0,
     view_radius: 3,

@@ -6,6 +6,10 @@
 // Interior is roughly x in [-2, 2], y in [0, 4], z in [-2, 2]. Camera looks in
 // through the open +z face.
 (
+    title: "Cornell Box",
+    description: "A classic enclosed lighting test with colored walls, metal, and glass.",
+    music: "ionian",
+    camera_mode: Path,
     materials: {
         "white": Lambertian((0.73, 0.73, 0.73)),
         "red":   Lambertian((0.65, 0.05, 0.05)),
@@ -57,4 +61,3 @@
         ],
     ),
 )
-

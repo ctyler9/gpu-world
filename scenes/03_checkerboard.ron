@@ -1,6 +1,10 @@
 // A 6x6 checkerboard of spheres alternating glass and blue, on the ground.
 // Demonstrates the `Grid` generator with `checker: true` and an `Orbit` camera.
 (
+    title: "Checkerboard",
+    description: "A clean checker pattern for judging shadows, reflections, and convergence.",
+    music: "ionian",
+    camera_mode: Path,
     materials: {
         "glass":  Dielectric(ior: 1.5),
         "blue":   Opaque((0.0, 0.2, 0.9), 0.001),

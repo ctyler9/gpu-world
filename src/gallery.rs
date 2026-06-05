@@ -7,7 +7,7 @@ use anyhow::{Context, Result};
 
 use crate::{
     camera::{Camera, CameraPath},
-    scene_def::{self, SceneDef, WorldDef},
+    scene_def::{self, SceneMetadata, WorldDef},
     world::World,
 };
 
@@ -25,6 +25,8 @@ pub struct Gallery {
 struct Entry {
     source: SceneSource,
     path: Option<PathBuf>,
+    metadata: SceneMetadata,
+    initial_camera: Camera,
 }
 
 enum SceneSource {
@@ -38,6 +40,12 @@ struct StaticScene {
     camera_path: Option<CameraPath>,
 }
 
+#[derive(Clone)]
+pub struct SceneOption {
+    pub index: usize,
+    pub title: String,
+}
+
 impl Gallery {
     /// Load every `scenes/*.ron` file — static scenes and procedural worlds
     /// alike. Broken files are reported and skipped.
@@ -49,11 +57,8 @@ impl Gallery {
 
         let mut entries = Vec::new();
         for path in scene_paths {
-            match load_source(&path, device, layout) {
-                Ok(source) => entries.push(Entry {
-                    source,
-                    path: Some(path),
-                }),
+            match load_entry(&path, device, layout) {
+                Ok(entry) => entries.push(entry),
                 Err(e) => eprintln!("warning: skipping {}: {e:#}", path.display()),
             }
         }
@@ -94,10 +99,33 @@ impl Gallery {
         let Some(path) = entry.path.clone() else {
             return Ok(());
         };
-        let source = load_source(&path, device, layout)
+        let new_entry = load_entry(&path, device, layout)
             .with_context(|| format!("reloading {}", path.display()))?;
-        entry.source = source;
+        *entry = new_entry;
         Ok(())
+    }
+
+    pub fn current_index(&self) -> usize {
+        self.current_index
+    }
+
+    pub fn scene_options(&self) -> Vec<SceneOption> {
+        self.entries
+            .iter()
+            .enumerate()
+            .map(|(index, entry)| SceneOption {
+                index,
+                title: entry
+                    .metadata
+                    .title
+                    .clone()
+                    .unwrap_or_else(|| "Scene".to_string()),
+            })
+            .collect()
+    }
+
+    pub fn current_metadata(&self) -> &SceneMetadata {
+        &self.entries[self.current_index].metadata
     }
 
     pub fn current_path(&self) -> Option<&CameraPath> {
@@ -128,6 +156,17 @@ impl Gallery {
         }
     }
 
+    pub fn reset_current_camera(&mut self) {
+        let camera = self.entries[self.current_index].initial_camera.clone();
+        *self.current_camera_mut() = camera;
+    }
+
+    pub fn select_index(&mut self, index: usize) {
+        if index < self.entries.len() {
+            self.current_index = index;
+        }
+    }
+
     pub fn select_next(&mut self) {
         self.current_index += 1;
         self.current_index %= self.entries.len();
@@ -155,22 +194,57 @@ fn discover_scene_files(dir: &Path) -> Result<Vec<PathBuf>> {
 
 /// Load a `.ron` file as either a static scene or a procedural world, detected
 /// from its contents (`World(( .. ))` vs a bare scene tuple).
-fn load_source(
+fn load_entry(
     path: &Path,
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
-) -> Result<SceneSource> {
+) -> Result<Entry> {
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("reading {}", path.display()))?;
+    let fallback_title = title_from_path(path);
     if scene_def::is_world_source(&text) {
-        let (cfg, camera) = WorldDef::from_ron(&text)?.build()?;
-        Ok(SceneSource::World(World::new(device, layout, cfg, camera)))
+        let def = WorldDef::from_ron(&text)?;
+        let mut metadata = def.metadata();
+        metadata.title.get_or_insert(fallback_title);
+        let (cfg, camera) = def.build()?;
+        Ok(Entry {
+            initial_camera: camera.clone(),
+            source: SceneSource::World(World::new(device, layout, cfg, camera)),
+            path: Some(path.to_path_buf()),
+            metadata,
+        })
     } else {
-        let (camera, camera_path, builder) = SceneDef::from_ron(&text)?.build()?;
-        Ok(SceneSource::Static(StaticScene {
-            camera,
-            resources: builder.build(device, layout),
-            camera_path,
-        }))
+        let def = scene_def::SceneDef::from_ron(&text)?;
+        let mut metadata = def.metadata();
+        metadata.title.get_or_insert(fallback_title);
+        let (camera, camera_path, builder) = def.build()?;
+        Ok(Entry {
+            initial_camera: camera.clone(),
+            source: SceneSource::Static(StaticScene {
+                camera,
+                resources: builder.build(device, layout),
+                camera_path,
+            }),
+            path: Some(path.to_path_buf()),
+            metadata,
+        })
     }
+}
+
+fn title_from_path(path: &Path) -> String {
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("scene");
+    let name = stem
+        .trim_start_matches(|c: char| c.is_ascii_digit())
+        .trim_start_matches('_');
+    name.split('_')
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut chars = part.chars();
+            match chars.next() {
+                Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }

@@ -8,6 +8,8 @@
 use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SizedSample};
+use serde::de::{Error, Visitor};
+use serde::{Deserialize, Deserializer};
 use std::sync::{
     atomic::{AtomicU32, AtomicU8, Ordering},
     Arc,
@@ -85,6 +87,33 @@ impl AudioMode {
     }
 }
 
+impl<'de> Deserialize<'de> for AudioMode {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct AudioModeVisitor;
+
+        impl Visitor<'_> for AudioModeVisitor {
+            type Value = AudioMode;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                write!(formatter, "one of {}", AudioMode::names())
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: Error,
+            {
+                AudioMode::parse(value)
+                    .ok_or_else(|| E::custom(format!("unknown audio mode `{value}`")))
+            }
+        }
+
+        deserializer.deserialize_str(AudioModeVisitor)
+    }
+}
+
 #[derive(Clone)]
 pub struct AudioControls {
     inner: Arc<AudioControlsInner>,
@@ -92,6 +121,7 @@ pub struct AudioControls {
 
 struct AudioControlsInner {
     mode: AtomicU8,
+    scene_mode: AtomicU8,
     volume: AtomicU32,
     arpeggio: AtomicU32,
     warmth: AtomicU32,
@@ -102,6 +132,7 @@ impl AudioControls {
         Self {
             inner: Arc::new(AudioControlsInner {
                 mode: AtomicU8::new(mode.index()),
+                scene_mode: AtomicU8::new(NO_SCENE_MODE),
                 volume: AtomicU32::new(1.0_f32.to_bits()),
                 arpeggio: AtomicU32::new(1.0_f32.to_bits()),
                 warmth: AtomicU32::new(0.65_f32.to_bits()),
@@ -115,6 +146,28 @@ impl AudioControls {
 
     pub fn set_mode(&self, mode: AudioMode) {
         self.inner.mode.store(mode.index(), Ordering::Relaxed);
+    }
+
+    pub fn set_scene_mode(&self, mode: Option<AudioMode>) {
+        let index = mode
+            .filter(|mode| *mode != AudioMode::Auto)
+            .map(AudioMode::index)
+            .unwrap_or(NO_SCENE_MODE);
+        self.inner.scene_mode.store(index, Ordering::Relaxed);
+    }
+
+    fn effective_mode(&self) -> AudioMode {
+        let selected = self.mode();
+        if selected != AudioMode::Auto {
+            return selected;
+        }
+
+        let scene_mode = self.inner.scene_mode.load(Ordering::Relaxed);
+        if scene_mode == NO_SCENE_MODE {
+            AudioMode::Auto
+        } else {
+            AudioMode::from_index(scene_mode)
+        }
     }
 
     pub fn volume(&self) -> f32 {
@@ -147,6 +200,8 @@ impl AudioControls {
             .store(value.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
     }
 }
+
+const NO_SCENE_MODE: u8 = u8::MAX;
 
 /// Start the ambient soundtrack on the default output device. The returned
 /// [`cpal::Stream`] must be kept alive for audio to keep playing — drop it to
@@ -251,7 +306,7 @@ struct AmbientSynth {
 
 impl AmbientSynth {
     fn new(sample_rate: f32, controls: AudioControls) -> Self {
-        let active_mode = controls.mode();
+        let active_mode = controls.effective_mode();
         let mut synth = Self {
             controls,
             active_mode,
@@ -370,7 +425,7 @@ impl AmbientSynth {
         let arp_samples = (self.sample_rate * ARP_SECONDS) as u64;
         let chord = self.sample_index / chord_samples;
         let arp_step = self.sample_index / arp_samples;
-        let selected_mode = self.controls.mode();
+        let selected_mode = self.controls.effective_mode();
 
         if chord != self.current_chord || selected_mode != self.active_mode {
             let had_previous_chord = self.current_chord != u64::MAX;

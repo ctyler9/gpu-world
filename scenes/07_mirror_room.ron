@@ -2,6 +2,10 @@
 // colored spheres reflect over and over (up to the path tracer's bounce limit).
 // White floor/ceiling, open front, black void behind it.
 (
+    title: "Mirror Room",
+    description: "Reflective walls multiply lamps and objects through the room.",
+    music: "aeolian",
+    camera_mode: Path,
     materials: {
         "floor":  Lambertian((0.20, 0.20, 0.24)),
         "white":  Lambertian((0.78, 0.78, 0.78)),

@@ -2,6 +2,10 @@
 // Five distinct materials means explicit spheres here; see 02_clusters.ron for
 // where the `Ring` generator shines (identical stacks repeated around a circle).
 (
+    title: "Material Ring",
+    description: "A compact orbit around glass, metal, and colored opaque spheres.",
+    music: "ionian",
+    camera_mode: Path,
     materials: {
         "glass":      Dielectric(ior: 1.5),
         "metal":      Metal((0.7, 0.5, 0.5)),

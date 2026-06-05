@@ -1,6 +1,10 @@
 // Procedural streaming world: a forest of columns (stacked spheres) on a grid,
 // with a quarter of the columns hashed out for ruined variety. Walk the aisles.
 World((
+    title: "Architecture World",
+    description: "An endless architectural field of stacked procedural columns.",
+    music: "aeolian",
+    camera_mode: Drift,
     world_seed: 424242,
     chunk_size: 8.0,
     view_radius: 2,

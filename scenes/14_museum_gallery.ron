@@ -2,6 +2,10 @@
 // The materials are restrained so this scene converges faster than the mirror
 // room while still showing glass, metal, shadows, and soft bounce light.
 (
+    title: "Museum Gallery",
+    description: "A clean white gallery with warm spotlights and three exhibit pieces.",
+    music: "ionian",
+    camera_mode: Path,
     materials: {
         "floor":     Opaque((0.55, 0.56, 0.54), 0.08),
         "wall":      Lambertian((0.80, 0.79, 0.74)),

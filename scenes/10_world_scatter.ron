@@ -2,6 +2,10 @@
 // with WASD. Chunks stream in/out around the camera. (Phase 2/3 brute-force
 // density is kept modest; the uniform-grid accelerator scales this up.)
 World((
+    title: "Scatter World",
+    description: "An endless field of scattered procedural spheres.",
+    music: "dorian",
+    camera_mode: Drift,
     world_seed: 12648430,
     chunk_size: 8.0,
     view_radius: 2,

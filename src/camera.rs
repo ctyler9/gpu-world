@@ -147,6 +147,10 @@ impl Camera {
         &self.uniforms
     }
 
+    pub fn fov_y(&self) -> f32 {
+        self.uniforms.fov_y
+    }
+
     /// The camera's world-space position. Drives procedural chunk streaming.
     pub fn position(&self) -> Vec3 {
         self.uniforms.origin
@@ -180,6 +184,10 @@ impl Camera {
     pub fn adjust_fov(&mut self, delta: f32) {
         let fov_y = self.uniforms.fov_y;
         self.uniforms.fov_y = (fov_y + delta).clamp(MIN_FOV_Y, MAX_FOV_Y);
+    }
+
+    pub fn set_fov(&mut self, fov_y: f32) {
+        self.uniforms.fov_y = fov_y.clamp(MIN_FOV_Y, MAX_FOV_Y);
     }
 
     fn calculate_uniforms(&mut self) {

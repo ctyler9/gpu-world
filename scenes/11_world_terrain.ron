@@ -1,6 +1,10 @@
 // Procedural streaming world: a rolling landscape whose sphere heights follow
 // world-space fbm noise (seamless across chunk borders). Skim over the hills.
 World((
+    title: "Terrain World",
+    description: "A streaming procedural terrain built from sphere bands.",
+    music: "mixolydian",
+    camera_mode: Drift,
     world_seed: 777,
     chunk_size: 8.0,
     view_radius: 3,

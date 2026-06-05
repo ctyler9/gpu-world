@@ -2,6 +2,10 @@
 // over a dark glossy floor in a black void. The mirror balls catch their
 // glowing neighbors. Shows the `Grid` generator cycling an emissive material.
 (
+    title: "Light Grid",
+    description: "A checker of cyan lamps and mirror balls over a glossy dark floor.",
+    music: "mixolydian",
+    camera_mode: Path,
     materials: {
         "lamp":   Emissive((0.4, 0.9, 1.0), 5.0),
         "mirror": Metal((0.9, 0.9, 0.95)),

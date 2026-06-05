@@ -3,6 +3,10 @@
 // background pitch dark so the lights pop. Orbit the camera to watch the
 // reflections sweep across the metal.
 (
+    title: "Neon Orbs",
+    description: "Glowing colored lights orbit a central mirror ball in a black void.",
+    music: "lydian",
+    camera_mode: Path,
     materials: {
         "floor":   Opaque((0.02, 0.02, 0.03), 0.25),
         "mirror":  Metal((0.95, 0.95, 0.97)),

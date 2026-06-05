@@ -2,6 +2,10 @@
 // walls. The camera path slowly pushes forward, making this one good with P
 // playback or auto-drift.
 (
+    title: "Portal Corridor",
+    description: "A long corridor with repeated emissive portal beads along the walls.",
+    music: "lydian",
+    camera_mode: Path,
     materials: {
         "floor":    Opaque((0.035, 0.036, 0.040), 0.25),
         "wall":     Lambertian((0.09, 0.095, 0.105)),

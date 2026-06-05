@@ -3,6 +3,7 @@
 
 use {
     anyhow::{Context, Result},
+    std::time::Instant,
     winit::{
         event::{DeviceEvent, ElementState, Event, MouseScrollDelta, WindowEvent},
         event_loop::{ControlFlow, EventLoop},
@@ -43,6 +44,7 @@ async fn main() -> Result<()> {
         gallery::Gallery::new(renderer.device(), renderer.scene_group_layout());
 
     let audio_controls = audio::AudioControls::new(audio_mode);
+    audio_controls.set_scene_mode(gallery.current_metadata().music);
     let mut music_ui = ui::MusicSettingsUi::new(
         &window,
         renderer.device(),
@@ -52,7 +54,7 @@ async fn main() -> Result<()> {
 
     // Start the ambient soundtrack. Keep the stream alive for the whole run
     // (dropping it stops playback); a missing audio device is non-fatal.
-    let _audio_stream = match audio::start(audio_controls) {
+    let _audio_stream = match audio::start(audio_controls.clone()) {
         Ok(stream) => Some(stream),
         Err(e) => {
             eprintln!("audio disabled: {e:#}");
@@ -68,8 +70,15 @@ async fn main() -> Result<()> {
     let mut key_d = false;
     let mut path_playback: Option<std::time::Instant> = None;
     let mut auto_drift = false;
+    apply_camera_recommendation(
+        &gallery,
+        &mut path_playback,
+        &mut auto_drift,
+        Instant::now(),
+    );
     let mut last_frame = std::time::Instant::now();
     let mut last_interaction = std::time::Instant::now();
+    let mut mouse_sensitivity = 1.0_f32;
 
     event_loop.run(|event, control_handle| {
         control_handle.set_control_flow(ControlFlow::Poll);
@@ -115,13 +124,29 @@ async fn main() -> Result<()> {
                                     }
                                     PhysicalKey::Code(KeyCode::ArrowLeft) => {
                                         gallery.select_previous();
-                                        path_playback = None;
+                                        audio_controls.set_scene_mode(
+                                            gallery.current_metadata().music,
+                                        );
+                                        apply_camera_recommendation(
+                                            &gallery,
+                                            &mut path_playback,
+                                            &mut auto_drift,
+                                            std::time::Instant::now(),
+                                        );
                                         renderer.reset_samples();
                                         last_interaction = std::time::Instant::now();
                                     }
                                     PhysicalKey::Code(KeyCode::ArrowRight) => {
                                         gallery.select_next();
-                                        path_playback = None;
+                                        audio_controls.set_scene_mode(
+                                            gallery.current_metadata().music,
+                                        );
+                                        apply_camera_recommendation(
+                                            &gallery,
+                                            &mut path_playback,
+                                            &mut auto_drift,
+                                            std::time::Instant::now(),
+                                        );
                                         renderer.reset_samples();
                                         last_interaction = std::time::Instant::now();
                                     }
@@ -139,7 +164,15 @@ async fn main() -> Result<()> {
                                             renderer.scene_group_layout(),
                                         ) {
                                             Ok(()) => {
-                                                path_playback = None;
+                                                audio_controls.set_scene_mode(
+                                                    gallery.current_metadata().music,
+                                                );
+                                                apply_camera_recommendation(
+                                                    &gallery,
+                                                    &mut path_playback,
+                                                    &mut auto_drift,
+                                                    std::time::Instant::now(),
+                                                );
                                                 renderer.reset_samples();
                                                 last_interaction = std::time::Instant::now();
                                             }
@@ -316,14 +349,42 @@ async fn main() -> Result<()> {
                             renderer.queue(),
                             &mut encoder,
                             &render_target,
+                            &ui::AppUiState {
+                                scenes: gallery.scene_options(),
+                                current_scene: gallery.current_index(),
+                                scene_description: gallery
+                                    .current_metadata()
+                                    .description
+                                    .clone(),
+                                scene_music: gallery.current_metadata().music,
+                                scene_camera_mode: gallery.current_metadata().camera_mode,
+                                path_available: gallery.current_path().is_some(),
+                                path_playing: path_playback.is_some(),
+                                auto_drift,
+                                fov_degrees: gallery.current_camera().fov_y().to_degrees(),
+                                mouse_sensitivity,
+                            },
                         );
                         if music_ui.take_interacted() {
                             last_interaction = std::time::Instant::now();
                         }
+                        let ui_actions = music_ui.take_actions();
                         command_buffers.push(encoder.finish());
                         renderer.queue().submit(command_buffers);
 
                         frame.present();
+                        if apply_ui_actions(
+                            ui_actions,
+                            &mut gallery,
+                            &audio_controls,
+                            &mut renderer,
+                            &mut path_playback,
+                            &mut auto_drift,
+                            &mut mouse_sensitivity,
+                            now,
+                        ) {
+                            last_interaction = std::time::Instant::now();
+                        }
                         window.request_redraw();
                     }
                     _ => (),
@@ -346,8 +407,8 @@ async fn main() -> Result<()> {
                     if music_ui.captures_pointer() {
                         return;
                     }
-                    let dx = dx as f32 * 0.01;
-                    let dy = dy as f32 * -0.01;
+                    let dx = dx as f32 * 0.01 * mouse_sensitivity;
+                    let dy = dy as f32 * -0.01 * mouse_sensitivity;
                     if left_mouse_button_pressed {
                         gallery.current_camera_mut().orbit(dx, dy);
                         renderer.reset_samples();
@@ -365,6 +426,97 @@ async fn main() -> Result<()> {
         }
     })?;
     Ok(())
+}
+
+fn apply_camera_recommendation(
+    gallery: &gallery::Gallery,
+    path_playback: &mut Option<Instant>,
+    auto_drift: &mut bool,
+    now: Instant,
+) {
+    match gallery
+        .current_metadata()
+        .camera_mode
+        .unwrap_or(scene_def::CameraMode::Manual)
+    {
+        scene_def::CameraMode::Manual => {
+            *path_playback = None;
+            *auto_drift = false;
+        }
+        scene_def::CameraMode::Path => {
+            *path_playback = gallery.current_path().map(|_| now);
+            *auto_drift = false;
+        }
+        scene_def::CameraMode::Drift => {
+            *path_playback = None;
+            *auto_drift = true;
+        }
+    }
+}
+
+fn apply_ui_actions(
+    actions: ui::UiActions,
+    gallery: &mut gallery::Gallery,
+    audio_controls: &audio::AudioControls,
+    renderer: &mut render::PathTracer,
+    path_playback: &mut Option<Instant>,
+    auto_drift: &mut bool,
+    mouse_sensitivity: &mut f32,
+    now: Instant,
+) -> bool {
+    let mut interacted = false;
+
+    if let Some(index) = actions.select_scene {
+        if index != gallery.current_index() {
+            gallery.select_index(index);
+            audio_controls.set_scene_mode(gallery.current_metadata().music);
+            apply_camera_recommendation(gallery, path_playback, auto_drift, now);
+            renderer.reset_samples();
+            interacted = true;
+        }
+    }
+
+    if actions.toggle_path {
+        if path_playback.is_some() {
+            *path_playback = None;
+        } else if gallery.current_path().is_some() {
+            *path_playback = Some(now);
+            *auto_drift = false;
+        }
+        renderer.reset_samples();
+        interacted = true;
+    }
+
+    if actions.reset_camera {
+        gallery.reset_current_camera();
+        if path_playback.is_some() && gallery.current_path().is_some() {
+            *path_playback = Some(now);
+        }
+        renderer.reset_samples();
+        interacted = true;
+    }
+
+    if let Some(enabled) = actions.set_auto_drift {
+        *auto_drift = enabled;
+        if enabled {
+            *path_playback = None;
+        }
+        renderer.reset_samples();
+        interacted = true;
+    }
+
+    if let Some(fov) = actions.set_fov_degrees {
+        gallery.current_camera_mut().set_fov(fov.to_radians());
+        renderer.reset_samples();
+        interacted = true;
+    }
+
+    if let Some(value) = actions.set_mouse_sensitivity {
+        *mouse_sensitivity = value.clamp(0.25, 3.0);
+        interacted = true;
+    }
+
+    interacted
 }
 
 fn parse_audio_mode() -> Result<audio::AudioMode> {

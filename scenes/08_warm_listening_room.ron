@@ -2,6 +2,10 @@
 // cluster of glass/metal "furniture" spheres. Open front for the camera, black
 // exterior so the room stays cozy instead of filling with sky light.
 (
+    title: "Warm Listening Room",
+    description: "A soft amber room with polished floor, low lamps, glass, and brass.",
+    music: "dorian",
+    camera_mode: Path,
     materials: {
         "floor":      Opaque((0.34, 0.20, 0.11), 0.18),
         "wall":       Lambertian((0.62, 0.48, 0.36)),

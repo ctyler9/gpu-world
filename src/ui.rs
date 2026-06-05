@@ -1,4 +1,8 @@
-use crate::audio::{AudioControls, AudioMode};
+use crate::{
+    audio::{AudioControls, AudioMode},
+    gallery::SceneOption,
+    scene_def::CameraMode,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MotionQuality {
@@ -48,6 +52,31 @@ pub struct MusicSettingsUi {
     performance: PerformanceSettings,
     panel_open: bool,
     interacted: bool,
+    actions: UiActions,
+}
+
+#[derive(Clone)]
+pub struct AppUiState {
+    pub scenes: Vec<SceneOption>,
+    pub current_scene: usize,
+    pub scene_description: String,
+    pub scene_music: Option<AudioMode>,
+    pub scene_camera_mode: Option<CameraMode>,
+    pub path_available: bool,
+    pub path_playing: bool,
+    pub auto_drift: bool,
+    pub fov_degrees: f32,
+    pub mouse_sensitivity: f32,
+}
+
+#[derive(Default)]
+pub struct UiActions {
+    pub select_scene: Option<usize>,
+    pub toggle_path: bool,
+    pub reset_camera: bool,
+    pub set_auto_drift: Option<bool>,
+    pub set_fov_degrees: Option<f32>,
+    pub set_mouse_sensitivity: Option<f32>,
 }
 
 impl MusicSettingsUi {
@@ -80,6 +109,7 @@ impl MusicSettingsUi {
             performance: PerformanceSettings::default(),
             panel_open: false,
             interacted: false,
+            actions: UiActions::default(),
         }
     }
 
@@ -107,6 +137,10 @@ impl MusicSettingsUi {
         std::mem::take(&mut self.interacted)
     }
 
+    pub fn take_actions(&mut self) -> UiActions {
+        std::mem::take(&mut self.actions)
+    }
+
     pub fn render(
         &mut self,
         window: &winit::window::Window,
@@ -114,10 +148,11 @@ impl MusicSettingsUi {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
+        app: &AppUiState,
     ) -> Vec<wgpu::CommandBuffer> {
         let raw_input = self.state.take_egui_input(window);
         let ctx = self.ctx.clone();
-        let output = ctx.run_ui(raw_input, |ui| self.show(ui.ctx()));
+        let output = ctx.run_ui(raw_input, |ui| self.show(ui.ctx(), app));
         self.state
             .handle_platform_output(window, output.platform_output);
 
@@ -170,7 +205,7 @@ impl MusicSettingsUi {
         extra_command_buffers
     }
 
-    fn show(&mut self, ctx: &egui::Context) {
+    fn show(&mut self, ctx: &egui::Context, app: &AppUiState) {
         if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
             self.panel_open = false;
         }
@@ -178,7 +213,7 @@ impl MusicSettingsUi {
         egui::Area::new("music_settings_gear".into())
             .anchor(egui::Align2::RIGHT_TOP, [-16.0, 16.0])
             .show(ctx, |ui| {
-                if ui.button("⚙").on_hover_text("Music settings").clicked() {
+                if ui.button("⚙").on_hover_text("Settings").clicked() {
                     self.panel_open = !self.panel_open;
                     self.interacted = true;
                 }
@@ -186,13 +221,95 @@ impl MusicSettingsUi {
 
         if self.panel_open {
             let mut open = true;
-            egui::Window::new("Music")
+            egui::Window::new("Settings")
                 .anchor(egui::Align2::RIGHT_TOP, [-16.0, 56.0])
                 .collapsible(false)
                 .resizable(false)
                 .open(&mut open)
                 .show(ctx, |ui| {
                     ui.set_min_width(260.0);
+
+                    ui.label("Scene");
+                    let mut scene_index = app.current_scene;
+                    let selected_title = app
+                        .scenes
+                        .iter()
+                        .find(|scene| scene.index == app.current_scene)
+                        .map(|scene| scene.title.as_str())
+                        .unwrap_or("Scene");
+                    egui::ComboBox::from_label("Scene")
+                        .selected_text(selected_title)
+                        .show_ui(ui, |ui| {
+                            for scene in &app.scenes {
+                                ui.selectable_value(
+                                    &mut scene_index,
+                                    scene.index,
+                                    scene.title.as_str(),
+                                );
+                            }
+                        });
+                    if scene_index != app.current_scene {
+                        self.actions.select_scene = Some(scene_index);
+                        self.interacted = true;
+                    }
+                    if !app.scene_description.is_empty() {
+                        ui.label(app.scene_description.as_str());
+                    }
+                    let music_label =
+                        app.scene_music.map(AudioMode::label).unwrap_or("auto");
+                    let camera_label = app
+                        .scene_camera_mode
+                        .map(CameraMode::label)
+                        .unwrap_or("manual");
+                    ui.label(format!("Recommended: {music_label} / {camera_label}"));
+
+                    ui.horizontal(|ui| {
+                        let path_label = if app.path_playing {
+                            "Pause path"
+                        } else {
+                            "Play path"
+                        };
+                        if ui
+                            .add_enabled(app.path_available, egui::Button::new(path_label))
+                            .clicked()
+                        {
+                            self.actions.toggle_path = true;
+                            self.interacted = true;
+                        }
+                        if ui.button("Reset camera").clicked() {
+                            self.actions.reset_camera = true;
+                            self.interacted = true;
+                        }
+                    });
+                    let mut auto_drift = app.auto_drift;
+                    if ui.checkbox(&mut auto_drift, "Auto drift").changed() {
+                        self.actions.set_auto_drift = Some(auto_drift);
+                        self.interacted = true;
+                    }
+
+                    let mut fov = app.fov_degrees;
+                    if ui
+                        .add(egui::Slider::new(&mut fov, 10.0..=120.0).text("FOV"))
+                        .changed()
+                    {
+                        self.actions.set_fov_degrees = Some(fov);
+                        self.interacted = true;
+                    }
+
+                    let mut mouse_sensitivity = app.mouse_sensitivity;
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut mouse_sensitivity, 0.25..=3.0)
+                                .text("Mouse sensitivity"),
+                        )
+                        .changed()
+                    {
+                        self.actions.set_mouse_sensitivity = Some(mouse_sensitivity);
+                        self.interacted = true;
+                    }
+
+                    ui.separator();
+                    ui.label("Music");
 
                     let mut mode = self.controls.mode();
                     egui::ComboBox::from_label("Mode")
