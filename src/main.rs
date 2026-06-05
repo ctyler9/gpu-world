@@ -7,6 +7,7 @@ use {
     winit::{
         event::{DeviceEvent, ElementState, Event, MouseScrollDelta, WindowEvent},
         event_loop::{ControlFlow, EventLoop},
+        keyboard::ModifiersState,
         window::Window,
     },
 };
@@ -79,6 +80,8 @@ async fn main() -> Result<()> {
     let mut last_frame = std::time::Instant::now();
     let mut last_interaction = std::time::Instant::now();
     let mut mouse_sensitivity = 1.0_f32;
+    let mut modifiers = ModifiersState::empty();
+    let mut screenshot_requested = false;
 
     event_loop.run(|event, control_handle| {
         control_handle.set_control_flow(ControlFlow::Poll);
@@ -100,7 +103,15 @@ async fn main() -> Result<()> {
                         let pressed = event.state == ElementState::Pressed;
                         match event.physical_key {
                             PhysicalKey::Code(KeyCode::KeyW) => key_w = pressed,
-                            PhysicalKey::Code(KeyCode::KeyS) => key_s = pressed,
+                            PhysicalKey::Code(KeyCode::KeyS) => {
+                                if pressed
+                                    && (modifiers.super_key() || modifiers.control_key())
+                                {
+                                    screenshot_requested = true;
+                                } else {
+                                    key_s = pressed;
+                                }
+                            }
                             PhysicalKey::Code(KeyCode::KeyA) => key_a = pressed,
                             PhysicalKey::Code(KeyCode::KeyD) => key_d = pressed,
                             _ => {
@@ -189,6 +200,9 @@ async fn main() -> Result<()> {
                                 }
                             }
                         }
+                    }
+                    WindowEvent::ModifiersChanged(next) => {
+                        modifiers = next.state();
                     }
                     WindowEvent::MouseInput {
                         device_id: _,
@@ -381,9 +395,19 @@ async fn main() -> Result<()> {
                             &mut path_playback,
                             &mut auto_drift,
                             &mut mouse_sensitivity,
+                            &mut screenshot_requested,
                             now,
                         ) {
                             last_interaction = std::time::Instant::now();
+                        }
+                        if screenshot_requested {
+                            screenshot_requested = false;
+                            match save_screenshot(&renderer) {
+                                Ok(path) => {
+                                    eprintln!("screenshot saved: {}", path.display())
+                                }
+                                Err(e) => eprintln!("screenshot failed: {e:#}"),
+                            }
                         }
                         window.request_redraw();
                     }
@@ -462,6 +486,7 @@ fn apply_ui_actions(
     path_playback: &mut Option<Instant>,
     auto_drift: &mut bool,
     mouse_sensitivity: &mut f32,
+    screenshot_requested: &mut bool,
     now: Instant,
 ) -> bool {
     let mut interacted = false;
@@ -496,6 +521,11 @@ fn apply_ui_actions(
         interacted = true;
     }
 
+    if actions.screenshot {
+        *screenshot_requested = true;
+        interacted = true;
+    }
+
     if let Some(enabled) = actions.set_auto_drift {
         *auto_drift = enabled;
         if enabled {
@@ -517,6 +547,21 @@ fn apply_ui_actions(
     }
 
     interacted
+}
+
+fn save_screenshot(renderer: &render::PathTracer) -> Result<std::path::PathBuf> {
+    let dir = std::path::PathBuf::from("screenshots");
+    std::fs::create_dir_all(&dir).context("creating screenshots directory")?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .context("system clock is before UNIX epoch")?;
+    let path = dir.join(format!(
+        "gpu-world-{}-{:09}.png",
+        now.as_secs(),
+        now.subsec_nanos()
+    ));
+    renderer.save_screenshot(&path)?;
+    Ok(path)
 }
 
 fn parse_audio_mode() -> Result<audio::AudioMode> {

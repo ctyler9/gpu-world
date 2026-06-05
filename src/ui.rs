@@ -74,6 +74,7 @@ pub struct UiActions {
     pub select_scene: Option<usize>,
     pub toggle_path: bool,
     pub reset_camera: bool,
+    pub screenshot: bool,
     pub set_auto_drift: Option<bool>,
     pub set_fov_degrees: Option<f32>,
     pub set_mouse_sensitivity: Option<f32>,
@@ -278,6 +279,10 @@ impl MusicSettingsUi {
                         }
                         if ui.button("Reset camera").clicked() {
                             self.actions.reset_camera = true;
+                            self.interacted = true;
+                        }
+                        if ui.button("Screenshot").clicked() {
+                            self.actions.screenshot = true;
                             self.interacted = true;
                         }
                     });

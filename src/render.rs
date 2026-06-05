@@ -2,7 +2,10 @@
 // SPDX-License-Identifier: CC-BY-4.0
 
 use bytemuck::{Pod, Zeroable};
-use std::sync::Arc;
+use std::{
+    path::Path,
+    sync::{mpsc, Arc},
+};
 
 use crate::camera::{Camera, CameraUniforms};
 
@@ -224,6 +227,87 @@ impl PathTracer {
             &self.upscale_sampler,
             &self.post_uniform_buffer,
         );
+    }
+
+    pub fn save_screenshot(&self, path: &Path) -> anyhow::Result<()> {
+        let width = self.render_width;
+        let height = self.render_height;
+        let bytes_per_pixel = 4u32;
+        let unpadded_bytes_per_row = width * bytes_per_pixel;
+        let padded_bytes_per_row =
+            align_to(unpadded_bytes_per_row, wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+        let output_buffer_size = padded_bytes_per_row as u64 * height as u64;
+
+        let output_buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("screenshot readback"),
+            size: output_buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let mut encoder =
+            self.device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("screenshot copy"),
+                });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.output_texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &output_buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        self.queue.submit(Some(encoder.finish()));
+
+        let slice = output_buffer.slice(..);
+        let (tx, rx) = mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        self.device.poll(wgpu::PollType::wait_indefinitely())?;
+        rx.recv()??;
+
+        let data = slice.get_mapped_range();
+        let mut pixels = vec![0u8; (width * height * bytes_per_pixel) as usize];
+        for y in 0..height as usize {
+            let src_start = y * padded_bytes_per_row as usize;
+            let src_end = src_start + unpadded_bytes_per_row as usize;
+            let dst_start = y * unpadded_bytes_per_row as usize;
+            pixels[dst_start..dst_start + unpadded_bytes_per_row as usize]
+                .copy_from_slice(&data[src_start..src_end]);
+        }
+        drop(data);
+        output_buffer.unmap();
+
+        if self.surface_format == wgpu::TextureFormat::Bgra8Unorm {
+            for px in pixels.chunks_exact_mut(4) {
+                px.swap(0, 2);
+            }
+        }
+
+        image::save_buffer_with_format(
+            path,
+            &pixels,
+            width,
+            height,
+            image::ColorType::Rgba8,
+            image::ImageFormat::Png,
+        )?;
+        Ok(())
     }
 
     pub fn encode_frame(
@@ -524,6 +608,10 @@ fn create_sample_textures(
     [device.create_texture(&desc), device.create_texture(&desc)]
 }
 
+fn align_to(value: u32, alignment: u32) -> u32 {
+    value.div_ceil(alignment) * alignment
+}
+
 fn create_output_texture(
     device: &wgpu::Device,
     width: u32,
@@ -541,7 +629,9 @@ fn create_output_texture(
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC,
         view_formats: &[],
     });
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
