@@ -1,0 +1,57 @@
+// A soft amber interior: warm walls, a polished floor, low lamps, and a small
+// cluster of glass/metal "furniture" spheres. Open front for the camera, black
+// exterior so the room stays cozy instead of filling with sky light.
+(
+    materials: {
+        "floor":      Opaque((0.34, 0.20, 0.11), 0.18),
+        "wall":       Lambertian((0.62, 0.48, 0.36)),
+        "ceiling":    Lambertian((0.70, 0.62, 0.52)),
+        "lamp":       Emissive((1.0, 0.62, 0.28), 9.0),
+        "shade":      Lambertian((0.78, 0.38, 0.18)),
+        "brass":      Metal((1.0, 0.72, 0.36)),
+        "smoke_glass": Dielectric(ior: 1.45, color: (0.72, 0.78, 0.84)),
+        "void":       Lambertian((0.0, 0.0, 0.0)),
+    },
+    objects: [
+        Room(
+            min: (-3.2, 0.0, -3.0),
+            max: ( 3.2, 3.8,  2.4),
+            floor:   "floor",
+            ceiling: "ceiling",
+            back:    "wall",
+            left:    "wall",
+            right:   "wall",
+        ),
+
+        Sphere(at: (-1.9, 2.35, -1.6), r: 0.32, mat: "lamp"),
+        Sphere(at: ( 1.9, 2.35, -1.6), r: 0.32, mat: "lamp"),
+        Sphere(at: ( 0.0, 3.05, -0.4), r: 0.42, mat: "lamp"),
+
+        Sphere(at: (-1.9, 1.18, -1.6), r: 0.38, mat: "shade"),
+        Sphere(at: ( 1.9, 1.18, -1.6), r: 0.38, mat: "shade"),
+        Sphere(at: (-1.9, 0.48, -1.6), r: 0.16, mat: "brass"),
+        Sphere(at: ( 1.9, 0.48, -1.6), r: 0.16, mat: "brass"),
+
+        Sphere(at: ( 0.0, 0.72, -0.45), r: 0.72, mat: "smoke_glass"),
+        Sphere(at: (-0.95, 0.55,  0.35), r: 0.55, mat: "brass"),
+        Sphere(at: ( 0.95, 0.50,  0.45), r: 0.50, mat: "shade"),
+
+        Sphere(at: (0.0, 1.8, 0.0), r: 5000.0, mat: "void"),
+    ],
+    camera: LookAt(
+        eye: (0.0, 1.65, 7.2),
+        center: (0.0, 1.35, -0.6),
+        up: (0.0, 1.0, 0.0),
+        fov: 36.0,
+    ),
+    path: Keyframes(
+        secs_per_segment: 5.0,
+        looping: true,
+        frames: [
+            (eye: (-2.2, 1.95, 7.4), center: (-0.2, 1.28, -0.7), fov: 36.0),
+            (eye: ( 0.0, 1.55, 6.1), center: ( 0.0, 1.10, -0.9), fov: 40.0),
+            (eye: ( 2.2, 1.95, 7.4), center: ( 0.2, 1.28, -0.7), fov: 36.0),
+            (eye: (-2.2, 1.95, 7.4), center: (-0.2, 1.28, -0.7), fov: 36.0),
+        ],
+    ),
+)

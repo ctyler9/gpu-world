@@ -1,0 +1,59 @@
+// A clean white gallery with warm spotlights and three simple exhibit pieces.
+// The materials are restrained so this scene converges faster than the mirror
+// room while still showing glass, metal, shadows, and soft bounce light.
+(
+    materials: {
+        "floor":     Opaque((0.55, 0.56, 0.54), 0.08),
+        "wall":      Lambertian((0.80, 0.79, 0.74)),
+        "ceiling":   Lambertian((0.72, 0.72, 0.70)),
+        "lamp":      Emissive((1.0, 0.86, 0.60), 10.0),
+        "stone":     Lambertian((0.48, 0.47, 0.43)),
+        "bronze":    Metal((0.78, 0.50, 0.28)),
+        "blue_glass": Dielectric(ior: 1.5, color: (0.56, 0.72, 1.0)),
+        "red":       Opaque((0.72, 0.12, 0.09), 0.02),
+        "void":      Lambertian((0.0, 0.0, 0.0)),
+    },
+    objects: [
+        Room(
+            min: (-4.0, 0.0, -4.0),
+            max: ( 4.0, 4.2,  2.4),
+            floor:   "floor",
+            ceiling: "ceiling",
+            back:    "wall",
+            left:    "wall",
+            right:   "wall",
+        ),
+
+        Sphere(at: (-2.2, 3.25, -2.8), r: 0.30, mat: "lamp"),
+        Sphere(at: ( 0.0, 3.35, -2.1), r: 0.34, mat: "lamp"),
+        Sphere(at: ( 2.2, 3.25, -2.8), r: 0.30, mat: "lamp"),
+
+        Sphere(at: (-2.05, 0.34, -1.55), r: 0.34, mat: "stone"),
+        Sphere(at: (-2.05, 0.92, -1.55), r: 0.58, mat: "blue_glass"),
+
+        Sphere(at: (0.0, 0.42, -1.85), r: 0.42, mat: "stone"),
+        Sphere(at: (0.0, 1.00, -1.85), r: 0.82, mat: "bronze"),
+        Sphere(at: (0.0, 1.78, -1.85), r: 0.34, mat: "bronze"),
+
+        Sphere(at: (2.05, 0.32, -1.50), r: 0.32, mat: "stone"),
+        Sphere(at: (2.05, 0.86, -1.50), r: 0.54, mat: "red"),
+
+        Sphere(at: (0.0, 2.0, -0.8), r: 5000.0, mat: "void"),
+    ],
+    camera: LookAt(
+        eye: (0.0, 1.9, 8.0),
+        center: (0.0, 1.25, -1.7),
+        up: (0.0, 1.0, 0.0),
+        fov: 34.0,
+    ),
+    path: Keyframes(
+        secs_per_segment: 6.0,
+        looping: true,
+        frames: [
+            (eye: (-3.0, 2.2, 7.8), center: (-1.4, 1.0, -1.6), fov: 35.0),
+            (eye: ( 0.0, 1.7, 6.2), center: ( 0.0, 1.2, -1.9), fov: 37.0),
+            (eye: ( 3.0, 2.2, 7.8), center: ( 1.4, 1.0, -1.6), fov: 35.0),
+            (eye: (-3.0, 2.2, 7.8), center: (-1.4, 1.0, -1.6), fov: 35.0),
+        ],
+    ),
+)
