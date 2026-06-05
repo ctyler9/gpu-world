@@ -124,7 +124,7 @@ impl AudioControls {
     pub fn set_volume(&self, value: f32) {
         self.inner
             .volume
-            .store(value.clamp(0.0, 1.2).to_bits(), Ordering::Relaxed);
+            .store(value.clamp(0.0, 2.0).to_bits(), Ordering::Relaxed);
     }
 
     pub fn arpeggio(&self) -> f32 {

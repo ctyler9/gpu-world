@@ -151,7 +151,7 @@ impl MusicSettingsUi {
 
                     let mut volume = self.controls.volume();
                     if ui
-                        .add(egui::Slider::new(&mut volume, 0.0..=1.2).text("Volume"))
+                        .add(egui::Slider::new(&mut volume, 0.0..=2.0).text("Volume"))
                         .changed()
                     {
                         self.controls.set_volume(volume);
