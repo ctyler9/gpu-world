@@ -1,0 +1,60 @@
+// A Cornell box. The walls are enormous spheres whose near surfaces read as
+// flat planes; a small emissive sphere near the ceiling is the only light. A
+// giant black "void" sphere wraps everything so rays escaping the open front
+// hit darkness instead of the bright sky -> a true enclosed, lamp-lit room.
+//
+// Interior is roughly x in [-2, 2], y in [0, 4], z in [-2, 2]. Camera looks in
+// through the open +z face.
+(
+    materials: {
+        "white": Lambertian((0.73, 0.73, 0.73)),
+        "red":   Lambertian((0.65, 0.05, 0.05)),
+        "green": Lambertian((0.12, 0.45, 0.15)),
+        "metal": Metal((0.8, 0.85, 0.88)),
+        "glass": Dielectric(ior: 1.5),
+        "lamp":  Emissive((1.0, 0.85, 0.6), 18.0),
+        "void":  Lambertian((0.0, 0.0, 0.0)),
+    },
+    objects: [
+        // Room shell. The `front` (+z) face is omitted, leaving it open for the
+        // camera to look through. Colored side walls, white everywhere else.
+        Room(
+            min: (-2.0, 0.0, -2.0),
+            max: ( 2.0, 4.0,  2.0),
+            floor:   "white",
+            ceiling: "white",
+            back:    "white",
+            left:    "red",
+            right:   "green",
+        ),
+
+        // Ceiling lamp.
+        Sphere(at: (0.0, 3.4, 0.0), r: 0.45, mat: "lamp"),
+
+        // Two objects on the floor.
+        Sphere(at: (-0.75, 0.7, -0.35), r: 0.7, mat: "metal"),
+        Sphere(at: ( 0.8,  0.5,  0.55), r: 0.5, mat: "glass"),
+
+        // Black enclosure so escaping rays see darkness, not sky.
+        Sphere(at: (0.0, 2.0, 0.0), r: 5000.0, mat: "void"),
+    ],
+    camera: LookAt(
+        eye: (0.0, 2.0, 8.5),
+        center: (0.0, 1.7, 0.0),
+        up: (0.0, 1.0, 0.0),
+        fov: 33.0,
+    ),
+    // Sweep gently across the open front instead of orbiting behind the closed
+    // box (which would just show the dark exterior).
+    path: Keyframes(
+        secs_per_segment: 5.0,
+        looping: true,
+        frames: [
+            (eye: (-3.5, 2.6, 8.0), center: (0.0, 1.7, 0.0), fov: 33.0),
+            (eye: ( 0.0, 1.9, 7.5), center: (0.0, 1.6, 0.0), fov: 36.0),
+            (eye: ( 3.5, 2.6, 8.0), center: (0.0, 1.7, 0.0), fov: 33.0),
+            (eye: (-3.5, 2.6, 8.0), center: (0.0, 1.7, 0.0), fov: 33.0),
+        ],
+    ),
+)
+

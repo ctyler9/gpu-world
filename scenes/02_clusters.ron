@@ -1,0 +1,46 @@
+// Five identical stacks evenly spaced around a ring. Each stack is a big blue
+// sphere, a tiny glass bead floating above it, and a metal sphere pulled inward
+// toward the center (inset: 0.3125). This is the `Ring` generator's sweet spot.
+(
+    materials: {
+        "blue":   Opaque((0.0, 0.2, 0.9), 0.001),
+        "metal":  Metal((0.8, 0.3, 0.3)),
+        "glass":  Dielectric(ior: 1.5),
+        "ground": Lambertian((1.0, 0.8, 0.1)),
+    },
+    objects: [
+        Ring(
+            center: (0.0, 0.0, 0.0),
+            radius: 1.6,
+            count: 5,
+            stack: [
+                (y: 0.5, r: 0.5, mat: "blue"),
+                (y: 1.1, r: 0.1, mat: "glass"),
+                (y: 0.2, r: 0.2, mat: "metal", inset: 0.3125),
+            ],
+        ),
+        Ground("ground"),
+    ],
+    camera: LookAt(
+        eye: (3.325, 1.792, 4.542),
+        center: (-0.052, 0.324, -0.090),
+        up: (0.0, 1.0, 0.0),
+        fov: 30.0,
+    ),
+    path: Keyframes(
+        secs_per_segment: 5.0,
+        looping: true,
+        frames: [
+            // Wide establishing shot
+            (eye: ( 5.0, 3.0,  5.0), center: (0.0, 0.5,  0.0), fov: 30.0),
+            // Swoop down close to one cluster
+            (eye: ( 1.0, 0.8,  2.5), center: (0.0, 0.8,  0.0), fov: 50.0),
+            // Drift across to another cluster
+            (eye: (-2.5, 0.8,  1.5), center: (-1.0, 0.5, 0.0), fov: 50.0),
+            // Pull back and orbit to the other side
+            (eye: (-5.0, 3.0, -5.0), center: (0.0, 0.5,  0.0), fov: 30.0),
+            // Back to start
+            (eye: ( 5.0, 3.0,  5.0), center: (0.0, 0.5,  0.0), fov: 30.0),
+        ],
+    ),
+)

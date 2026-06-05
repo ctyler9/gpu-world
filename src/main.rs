@@ -13,8 +13,11 @@ use {
 mod algebra;
 mod camera;
 mod gallery;
+mod procgen;
 mod render;
 mod scene;
+mod scene_def;
+mod world;
 
 const WIDTH: u32 = 1600;
 const HEIGHT: u32 = 1200;
@@ -41,6 +44,8 @@ async fn main() -> Result<()> {
     let mut key_a = false;
     let mut key_d = false;
     let mut path_playback: Option<std::time::Instant> = None;
+    let mut auto_drift = false;
+    let mut last_frame = std::time::Instant::now();
 
     event_loop.run(|event, control_handle| {
         control_handle.set_control_flow(ControlFlow::Poll);
@@ -94,6 +99,23 @@ async fn main() -> Result<()> {
                                         path_playback = Some(std::time::Instant::now());
                                     }
                                 }
+                                PhysicalKey::Code(KeyCode::KeyR) => {
+                                    match gallery.reload_current(
+                                        renderer.device(),
+                                        renderer.scene_group_layout(),
+                                    ) {
+                                        Ok(()) => {
+                                            path_playback = None;
+                                            renderer.reset_samples();
+                                        }
+                                        Err(e) => eprintln!("reload failed: {e:#}"),
+                                    }
+                                }
+                                PhysicalKey::Code(KeyCode::KeyF) => {
+                                    // Toggle slow automatic forward drift, for
+                                    // hands-off streaming walkthroughs.
+                                    auto_drift = !auto_drift;
+                                }
                                 _ => (),
                             }
                         }
@@ -124,27 +146,44 @@ async fn main() -> Result<()> {
                         }
                     }
 
-                    const MOVE_SPEED: f32 = 0.05;
-                    const STRAFE_SPEED: f32 = 0.05;
+                    // Frame-rate-independent movement: scale speeds by the time
+                    // since the last frame (world units per second).
+                    let dt = last_frame.elapsed().as_secs_f32();
+                    last_frame = std::time::Instant::now();
+                    const MOVE_SPEED: f32 = 3.0;
+                    const STRAFE_SPEED: f32 = 3.0;
+                    const DRIFT_SPEED: f32 = 2.0;
                     let camera = gallery.current_camera_mut();
                     let mut moved = false;
                     if key_w {
-                        camera.fly(-MOVE_SPEED);
+                        camera.fly(-MOVE_SPEED * dt);
                         moved = true;
                     }
                     if key_s {
-                        camera.fly(MOVE_SPEED);
+                        camera.fly(MOVE_SPEED * dt);
                         moved = true;
                     }
                     if key_a {
-                        camera.pan(-STRAFE_SPEED, 0.0);
+                        camera.pan(-STRAFE_SPEED * dt, 0.0);
                         moved = true;
                     }
                     if key_d {
-                        camera.pan(STRAFE_SPEED, 0.0);
+                        camera.pan(STRAFE_SPEED * dt, 0.0);
+                        moved = true;
+                    }
+                    if auto_drift {
+                        camera.fly(-DRIFT_SPEED * dt);
                         moved = true;
                     }
                     if moved {
+                        renderer.reset_samples();
+                    }
+
+                    // Stream procedural chunks around the (possibly moved) camera.
+                    // Rebuilds the scene buffers only on chunk-boundary crossings;
+                    // reset accumulation when that happens.
+                    if gallery.update_world(renderer.device(), renderer.scene_group_layout())
+                    {
                         renderer.reset_samples();
                     }
 
@@ -156,8 +195,11 @@ async fn main() -> Result<()> {
                         .texture
                         .create_view(&wgpu::TextureViewDescriptor::default());
 
-                    let scene = gallery.current_scene();
-                    renderer.render_frame(&scene.camera, &scene.resources, &render_target);
+                    renderer.render_frame(
+                        gallery.current_camera(),
+                        gallery.current_resources(),
+                        &render_target,
+                    );
 
                     frame.present();
                     window.request_redraw();

@@ -6,7 +6,7 @@ use {
     std::ops,
 };
 
-#[derive(Debug, Copy, Clone, Pod, Zeroable)]
+#[derive(Debug, Copy, Clone, PartialEq, Pod, Zeroable)]
 #[repr(C)]
 pub struct Vec3([f32; 3]);
 
@@ -66,6 +66,18 @@ impl Vec3 {
 
     pub fn normalized(self) -> Vec3 {
         self * self.length().recip()
+    }
+}
+
+impl From<(f32, f32, f32)> for Vec3 {
+    fn from((x, y, z): (f32, f32, f32)) -> Self {
+        Vec3([x, y, z])
+    }
+}
+
+impl From<[f32; 3]> for Vec3 {
+    fn from([x, y, z]: [f32; 3]) -> Self {
+        Vec3([x, y, z])
     }
 }
 

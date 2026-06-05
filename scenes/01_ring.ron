@@ -1,0 +1,33 @@
+// A big metal hero at the center, ringed by five spheres of varied materials.
+// Five distinct materials means explicit spheres here; see 02_clusters.ron for
+// where the `Ring` generator shines (identical stacks repeated around a circle).
+(
+    materials: {
+        "glass":      Dielectric(ior: 1.5),
+        "metal":      Metal((0.7, 0.5, 0.5)),
+        "diffuse":    Lambertian((0.5, 0.5, 0.9)),
+        "cornflower": Opaque((0.3, 0.6, 0.9), 0.9),
+        "turquoise":  Opaque((0.3, 0.9, 0.7), 0.3),
+        "magenta":    Opaque((0.9, 0.3, 0.7), 0.001),
+        "ground":     Lambertian((0.7, 0.9, 0.2)),
+    },
+    objects: [
+        Sphere(at: (0.0, 0.7, 0.0), r: 0.7, mat: "metal"),
+
+        // Five spheres evenly spaced on a radius-1.6 ring around the center.
+        Sphere(at: ( 1.6,   0.5,  0.0),   r: 0.5, mat: "glass"),
+        Sphere(at: ( 0.791, 0.5,  1.522), r: 0.5, mat: "diffuse"),
+        Sphere(at: (-1.294, 0.5,  0.940), r: 0.5, mat: "cornflower"),
+        Sphere(at: (-1.294, 0.5, -0.940), r: 0.5, mat: "turquoise"),
+        Sphere(at: ( 0.791, 0.5, -1.522), r: 0.5, mat: "magenta"),
+
+        Ground("ground"),
+    ],
+    camera: LookAt(
+        eye: (2.857, 5.002, 3.919),
+        center: (0.0, 0.0, 0.0),
+        up: (0.0, 1.0, 0.0),
+        fov: 30.0,
+    ),
+    path: Orbit(center: (0.0, 0.5, 0.0), radius: 4.0, height: 2.0, fov: 30.0, secs: 4.0, steps: 4),
+)

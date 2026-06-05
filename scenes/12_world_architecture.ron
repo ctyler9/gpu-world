@@ -1,0 +1,27 @@
+// Procedural streaming world: a forest of columns (stacked spheres) on a grid,
+// with a quarter of the columns hashed out for ruined variety. Walk the aisles.
+World((
+    world_seed: 424242,
+    chunk_size: 8.0,
+    view_radius: 2,
+    max_spheres: 300,
+    palette: {
+        "stone":  Lambertian((0.72, 0.70, 0.66)),
+        "marble": Lambertian((0.88, 0.87, 0.84)),
+        "copper": Metal((0.80, 0.55, 0.35)),
+        "floor":  Lambertian((0.40, 0.38, 0.36)),
+    },
+    ground: "floor",
+    biome: Architecture(
+        spacing: 4.0,
+        col_radius: 0.6,
+        height: 4,
+        mats: ["stone", "marble", "copper"],
+    ),
+    camera: LookAt(
+        eye: (0.0, 2.0, 2.0),
+        center: (0.0, 2.5, -8.0),
+        up: (0.0, 1.0, 0.0),
+        fov: 60.0,
+    ),
+))

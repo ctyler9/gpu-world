@@ -132,19 +132,111 @@ fn intersect_sphere(ray: Ray, sphere: Sphere) -> Intersection {
   return Intersection(N, t, sphere.material_index);
 }
 
-fn intersect_scene(ray: Ray) -> Intersection {
-  var closest_hit = no_intersection();
-  closest_hit.t = FLT_MAX;
-  for (var i = 0u; i < arrayLength(&spheres); i += 1u) {
-    let sphere = spheres[i];
-    let hit = intersect_sphere(ray, sphere);
-    if hit.t > 0. && hit.t < closest_hit.t {
-      closest_hit = hit;
+// Test every sphere bucketed into `cell`, updating the running closest hit.
+fn test_cell(ray: Ray, cell: u32, closest: ptr<function, Intersection>) {
+  let base = cell * 2u;
+  let start = cell_ranges[base];
+  let count = cell_ranges[base + 1u];
+  for (var k = 0u; k < count; k += 1u) {
+    let si = sphere_indices[start + k];
+    let hit = intersect_sphere(ray, spheres[si]);
+    if hit.t > 0. && hit.t < (*closest).t {
+      *closest = hit;
     }
   }
-  if closest_hit.t < FLT_MAX {
-    return closest_hit;
+}
+
+// Find the closest intersection by walking the uniform grid (2D DDA over XZ),
+// testing only spheres in the visited cells. A single-cell grid degenerates to
+// a brute-force loop (used by static scenes).
+fn intersect_scene(ray: Ray) -> Intersection {
+  var closest = no_intersection();
+  closest.t = FLT_MAX;
+
+  let nx = i32(grid.nx);
+  let nz = i32(grid.nz);
+
+  if nx == 1 && nz == 1 {
+    test_cell(ray, 0u, &closest);
+    if closest.t < FLT_MAX { return closest; }
+    return no_intersection();
   }
+
+  let cell = 1. / grid.inv_cell;
+  let min_x = grid.min_x;
+  let min_z = grid.min_z;
+  let max_x = min_x + f32(nx) * cell;
+  let max_z = min_z + f32(nz) * cell;
+
+  let ox = ray.origin.x;
+  let oz = ray.origin.z;
+  let dx = ray.direction.x;
+  let dz = ray.direction.z;
+
+  // Clip the ray to the grid's XZ bounds (slab test); y is unbounded.
+  var t_enter = 0.;
+  var t_exit = FLT_MAX;
+  if abs(dx) < 1e-8 {
+    if ox < min_x || ox > max_x { return no_intersection(); }
+  } else {
+    let inv = 1. / dx;
+    var t0 = (min_x - ox) * inv;
+    var t1 = (max_x - ox) * inv;
+    if t0 > t1 { let tmp = t0; t0 = t1; t1 = tmp; }
+    t_enter = max(t_enter, t0);
+    t_exit = min(t_exit, t1);
+  }
+  if abs(dz) < 1e-8 {
+    if oz < min_z || oz > max_z { return no_intersection(); }
+  } else {
+    let inv = 1. / dz;
+    var t0 = (min_z - oz) * inv;
+    var t1 = (max_z - oz) * inv;
+    if t0 > t1 { let tmp = t0; t0 = t1; t1 = tmp; }
+    t_enter = max(t_enter, t0);
+    t_exit = min(t_exit, t1);
+  }
+  if t_enter > t_exit { return no_intersection(); }
+  t_enter = max(t_enter, 0.);
+
+  // Starting cell at the entry point.
+  let ex = ox + dx * t_enter;
+  let ez = oz + dz * t_enter;
+  var ix = clamp(i32(floor((ex - min_x) * grid.inv_cell)), 0, nx - 1);
+  var iz = clamp(i32(floor((ez - min_z) * grid.inv_cell)), 0, nz - 1);
+
+  let step_x = select(-1, 1, dx >= 0.);
+  let step_z = select(-1, 1, dz >= 0.);
+
+  // Parameter to the next x/z cell boundary, and per-cell increments.
+  let bx = min_x + f32(ix + select(0, 1, dx >= 0.)) * cell;
+  let bz = min_z + f32(iz + select(0, 1, dz >= 0.)) * cell;
+  var t_max_x = select(FLT_MAX, (bx - ox) / dx, abs(dx) >= 1e-8);
+  var t_max_z = select(FLT_MAX, (bz - oz) / dz, abs(dz) >= 1e-8);
+  let t_delta_x = select(FLT_MAX, cell / abs(dx), abs(dx) >= 1e-8);
+  let t_delta_z = select(FLT_MAX, cell / abs(dz), abs(dz) >= 1e-8);
+
+  loop {
+    test_cell(ray, u32(iz) * grid.nx + u32(ix), &closest);
+
+    // We have now covered everything up to t_cell_exit; a closer hit cannot
+    // lie beyond it, so stop as soon as the closest hit is within reach.
+    let t_cell_exit = min(t_max_x, t_max_z);
+    if closest.t <= t_cell_exit { return closest; }
+    if t_cell_exit > t_exit { break; }
+
+    if t_max_x < t_max_z {
+      ix += step_x;
+      t_max_x += t_delta_x;
+      if ix < 0 || ix >= nx { break; }
+    } else {
+      iz += step_z;
+      t_max_z += t_delta_z;
+      if iz < 0 || iz >= nz { break; }
+    }
+  }
+
+  if closest.t < FLT_MAX { return closest; }
   return no_intersection();
 }
 
@@ -243,6 +335,8 @@ fn point_on_ray(ray: Ray, t: f32) -> vec3<f32> {
 struct Material {
   color: vec3f,
   metallic_or_ior: f32,
+  // Light emitted by the surface (radiance). Zero for non-emitters.
+  emission: vec3f,
 }
 
 fn sky_color(ray: Ray) -> vec3f {
@@ -250,8 +344,32 @@ fn sky_color(ray: Ray) -> vec3f {
   return (1. - t) * vec3(1.) + t * vec3(0.3, 0.5, 1.);
 }
 
+// The color seen by a ray that escapes the scene: the procedural sky blended
+// toward a solid background color by `sky_amount` (0 = solid, 1 = full sky).
+fn background(ray: Ray) -> vec3f {
+  let solid = vec3(grid.bg_r, grid.bg_g, grid.bg_b);
+  return mix(solid, sky_color(ray), grid.sky_amount);
+}
+
+// Header for the uniform-grid accelerator + per-scene background (mirrors
+// `GridHeader` in scene.rs).
+struct GridHeader {
+  min_x: f32,
+  min_z: f32,
+  inv_cell: f32,
+  nx: u32,
+  nz: u32,
+  bg_r: f32,
+  bg_g: f32,
+  bg_b: f32,
+  sky_amount: f32,
+}
+
 @group(1) @binding(0) var<storage> materials: array<Material>;
 @group(1) @binding(1) var<storage> spheres: array<Sphere>;
+@group(1) @binding(2) var<storage> grid: GridHeader;
+@group(1) @binding(3) var<storage> cell_ranges: array<u32>;
+@group(1) @binding(4) var<storage> sphere_indices: array<u32>;
 
 @group(0) @binding(1) var radiance_samples_old: texture_2d<f32>;
 @group(0) @binding(2) var radiance_samples_new: texture_storage_2d<rgba32float, write>;
@@ -299,12 +417,16 @@ var<private> vertices: TriangleVertices = TriangleVertices(
   while path_length < MAX_PATH_LENGTH {
     let hit = intersect_scene(ray);
     if !is_intersection_valid(hit) {
-      // If no intersection was found, return the color of the sky and terminate the path.
-      radiance_sample += throughput * sky_color(ray);
+      // If no intersection was found, return the background and terminate.
+      radiance_sample += throughput * background(ray);
       break;
     }
 
     let material = materials[hit.material_index];
+
+    // Add any light emitted by the surface, scaled by the path's throughput.
+    radiance_sample += throughput * material.emission;
+
     let scattered = scatter(ray, hit, material);
     throughput *= scattered.attenuation;
     ray = scattered.ray;

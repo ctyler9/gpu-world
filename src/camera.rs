@@ -40,6 +40,38 @@ pub struct CameraPath {
 }
 
 impl CameraPath {
+    /// A looping circular orbit around `center` at the given `radius` and
+    /// `height`, sampled into `steps` segments. Saves hand-writing keyframes for
+    /// the common "fly around the subject" shot.
+    pub fn orbit(
+        center: Vec3,
+        radius: f32,
+        height: f32,
+        fov_y: f32,
+        secs_per_segment: f32,
+        steps: usize,
+    ) -> Self {
+        let up = Vec3::new(0., 1., 0.);
+        let steps = steps.max(1);
+        let keyframes = (0..=steps)
+            .map(|i| {
+                let angle = i as f32 / steps as f32 * std::f32::consts::TAU;
+                CameraKeyframe {
+                    origin: center
+                        + Vec3::new(angle.cos() * radius, height, angle.sin() * radius),
+                    center,
+                    up,
+                    fov_y,
+                }
+            })
+            .collect();
+        Self {
+            keyframes,
+            secs_per_segment,
+            looping: true,
+        }
+    }
+
     pub fn camera_at(&self, elapsed_secs: f32) -> Camera {
         let n = self.keyframes.len();
         assert!(n >= 1);
@@ -113,6 +145,11 @@ impl Camera {
 
     pub fn uniforms(&self) -> &CameraUniforms {
         &self.uniforms
+    }
+
+    /// The camera's world-space position. Drives procedural chunk streaming.
+    pub fn position(&self) -> Vec3 {
+        self.uniforms.origin
     }
 
     pub fn zoom(&mut self, displacement: f32) {

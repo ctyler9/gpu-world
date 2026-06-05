@@ -1,0 +1,32 @@
+// A 7x7 checkerboard alternating glowing cyan lamps and mirror balls, hovering
+// over a dark glossy floor in a black void. The mirror balls catch their
+// glowing neighbors. Shows the `Grid` generator cycling an emissive material.
+(
+    materials: {
+        "lamp":   Emissive((0.4, 0.9, 1.0), 5.0),
+        "mirror": Metal((0.9, 0.9, 0.95)),
+        "floor":  Opaque((0.03, 0.03, 0.04), 0.3),
+        "void":   Lambertian((0.0, 0.0, 0.0)),
+    },
+    objects: [
+        Grid(
+            origin: (0.0, 0.5, 0.0),
+            cols: 7,
+            rows: 7,
+            spacing: 1.1,
+            y: 0.5,
+            r: 0.38,
+            materials: ["lamp", "mirror"],
+            checker: true,
+        ),
+        Sphere(at: (0.0, -1000.0, 0.0), r: 1000.0, mat: "floor"),
+        Sphere(at: (0.0, 1.0, 0.0), r: 5000.0, mat: "void"),
+    ],
+    camera: LookAt(
+        eye: (6.0, 4.5, 6.0),
+        center: (0.0, 0.4, 0.0),
+        up: (0.0, 1.0, 0.0),
+        fov: 40.0,
+    ),
+    path: Orbit(center: (0.0, 0.5, 0.0), radius: 7.5, height: 4.0, fov: 40.0, secs: 5.0, steps: 8),
+)

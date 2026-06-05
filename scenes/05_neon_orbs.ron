@@ -1,0 +1,44 @@
+// A night scene: six neon-colored glowing orbs encircle a central mirror ball,
+// all reflected in a dark glossy floor. The black "void" enclosure keeps the
+// background pitch dark so the lights pop. Orbit the camera to watch the
+// reflections sweep across the metal.
+(
+    materials: {
+        "floor":   Opaque((0.02, 0.02, 0.03), 0.25),
+        "mirror":  Metal((0.95, 0.95, 0.97)),
+        "glass":   Dielectric(ior: 1.5),
+        "red":     Emissive((1.0, 0.1, 0.2), 6.0),
+        "orange":  Emissive((1.0, 0.5, 0.1), 6.0),
+        "yellow":  Emissive((1.0, 0.9, 0.2), 6.0),
+        "green":   Emissive((0.2, 1.0, 0.3), 6.0),
+        "blue":    Emissive((0.2, 0.4, 1.0), 6.0),
+        "magenta": Emissive((1.0, 0.2, 0.9), 6.0),
+        "void":    Lambertian((0.0, 0.0, 0.0)),
+    },
+    objects: [
+        // Six glowing orbs spaced 60 degrees apart on a radius-2.5 circle, each
+        // a different neon color cycled across the ring positions.
+        Ring(
+            center: (0.0, 0.6, 0.0),
+            radius: 2.5,
+            count: 6,
+            stack: [
+                (y: 0.6, r: 0.45, mat: ["red", "orange", "yellow", "green", "blue", "magenta"]),
+            ],
+        ),
+
+        // Central mirror ball and a small glass bead floating above it.
+        Sphere(at: (0.0, 1.0, 0.0), r: 1.0, mat: "mirror"),
+        Sphere(at: (0.0, 2.5, 0.0), r: 0.35, mat: "glass"),
+
+        Sphere(at: (0.0, -1000.0, 0.0), r: 1000.0, mat: "floor"),
+        Sphere(at: (0.0, 1.0, 0.0), r: 5000.0, mat: "void"),
+    ],
+    camera: LookAt(
+        eye: (5.5, 2.5, 5.5),
+        center: (0.0, 0.8, 0.0),
+        up: (0.0, 1.0, 0.0),
+        fov: 38.0,
+    ),
+    path: Orbit(center: (0.0, 0.9, 0.0), radius: 6.0, height: 2.6, fov: 38.0, secs: 5.0, steps: 8),
+)

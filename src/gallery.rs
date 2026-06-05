@@ -1,216 +1,176 @@
 // Originally written in 2025 by Arman Uguray <arman.uguray@gmail.com>
 // SPDX-License-Identifier: CC-BY-4.0
 
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result};
+
 use crate::{
-    algebra::Vec3,
-    camera::{Camera, CameraKeyframe, CameraPath},
-    scene::{Material, SceneBuilder, Sphere},
+    camera::{Camera, CameraPath},
+    scene_def::{self, SceneDef, WorldDef},
+    world::World,
 };
 
+/// Directory that scene `.ron` files are loaded from, relative to the crate.
+const SCENES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/scenes");
+
 pub struct Gallery {
-    current_scene_index: usize,
-    scenes: Vec<Scene>,
+    current_index: usize,
+    entries: Vec<Entry>,
 }
 
-pub struct Scene {
-    pub camera: Camera,
-    pub resources: wgpu::BindGroup,
-    pub camera_path: Option<CameraPath>,
+/// One slot in the gallery: either a static authored scene or a procedural
+/// streaming world. `path` is set only for file-backed static scenes (so reload
+/// knows what to re-read).
+struct Entry {
+    source: SceneSource,
+    path: Option<PathBuf>,
+}
+
+enum SceneSource {
+    Static(StaticScene),
+    World(World),
+}
+
+struct StaticScene {
+    camera: Camera,
+    resources: wgpu::BindGroup,
+    camera_path: Option<CameraPath>,
 }
 
 impl Gallery {
+    /// Load every `scenes/*.ron` file — static scenes and procedural worlds
+    /// alike. Broken files are reported and skipped.
     pub fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
-        let scenes = vec![scene_with_spheres(), another_scene_with_spheres()];
-        Self {
-            current_scene_index: scenes.len() - 1,
-            scenes: scenes
-                .into_iter()
-                .map(|(camera, camera_path, builder)| Scene {
-                    camera,
-                    resources: builder.build(device, layout),
-                    camera_path,
-                })
-                .collect(),
+        let scene_paths = discover_scene_files(SCENES_DIR.as_ref()).unwrap_or_else(|e| {
+            eprintln!("warning: could not read scenes from {SCENES_DIR}: {e:#}");
+            Vec::new()
+        });
+
+        let mut entries = Vec::new();
+        for path in scene_paths {
+            match load_source(&path, device, layout) {
+                Ok(source) => entries.push(Entry {
+                    source,
+                    path: Some(path),
+                }),
+                Err(e) => eprintln!("warning: skipping {}: {e:#}", path.display()),
+            }
         }
+
+        if entries.is_empty() {
+            panic!("no scenes loaded from {SCENES_DIR}; add a .ron file there");
+        }
+
+        Self {
+            current_index: 0,
+            entries,
+        }
+    }
+
+    /// If the current slot is a procedural world, reconcile its loaded chunks
+    /// with the camera position. Returns `true` when the world rebuilt (the
+    /// caller should then reset sample accumulation).
+    pub fn update_world(
+        &mut self,
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+    ) -> bool {
+        match &mut self.entries[self.current_index].source {
+            SceneSource::World(w) => w.update(device, layout),
+            SceneSource::Static(_) => false,
+        }
+    }
+
+    /// Re-read the current entry's file and rebuild it (static scene or world).
+    /// Reloading a world resets its view to the spawn camera. On error the
+    /// previously loaded entry is kept.
+    pub fn reload_current(
+        &mut self,
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+    ) -> Result<()> {
+        let entry = &mut self.entries[self.current_index];
+        let Some(path) = entry.path.clone() else {
+            return Ok(());
+        };
+        let source = load_source(&path, device, layout)
+            .with_context(|| format!("reloading {}", path.display()))?;
+        entry.source = source;
+        Ok(())
     }
 
     pub fn current_path(&self) -> Option<&CameraPath> {
-        self.scenes[self.current_scene_index].camera_path.as_ref()
+        match &self.entries[self.current_index].source {
+            SceneSource::Static(s) => s.camera_path.as_ref(),
+            SceneSource::World(_) => None,
+        }
     }
 
-    pub fn current_scene(&self) -> &Scene {
-        &self.scenes[self.current_scene_index]
+    pub fn current_camera(&self) -> &Camera {
+        match &self.entries[self.current_index].source {
+            SceneSource::Static(s) => &s.camera,
+            SceneSource::World(w) => w.camera(),
+        }
+    }
+
+    pub fn current_resources(&self) -> &wgpu::BindGroup {
+        match &self.entries[self.current_index].source {
+            SceneSource::Static(s) => &s.resources,
+            SceneSource::World(w) => w.resources(),
+        }
     }
 
     pub fn current_camera_mut(&mut self) -> &mut Camera {
-        &mut self.scenes[self.current_scene_index].camera
+        match &mut self.entries[self.current_index].source {
+            SceneSource::Static(s) => &mut s.camera,
+            SceneSource::World(w) => w.camera_mut(),
+        }
     }
 
     pub fn select_next(&mut self) {
-        self.current_scene_index += 1;
-        self.current_scene_index %= self.scenes.len();
+        self.current_index += 1;
+        self.current_index %= self.entries.len();
     }
 
     pub fn select_previous(&mut self) {
-        if self.current_scene_index == 0 {
-            self.current_scene_index = self.scenes.len() - 1;
+        if self.current_index == 0 {
+            self.current_index = self.entries.len() - 1;
         } else {
-            self.current_scene_index -= 1;
+            self.current_index -= 1;
         }
     }
 }
 
-#[rustfmt::skip]
-fn scene_with_spheres() -> (Camera, Option<CameraPath>, SceneBuilder) {
-    let mut builder = SceneBuilder::default();
-
-    let glass = builder.add_material(Material::transparent_dielectric(Vec3::all(1.), 1.5));
-    let diffuse = builder.add_material(Material::lambertian(Vec3::new(0.5, 0.5, 0.9)));
-    let metal = builder.add_material(Material::metal(Vec3::new(0.7, 0.5, 0.5)));
-    let cornflower = builder.add_material(Material::opaque(Vec3::new(0.3, 0.6, 0.9), 0.9));
-    let turquoise = builder.add_material(Material::opaque(Vec3::new(0.3, 0.9, 0.7), 0.3));
-    let magenta = builder.add_material(Material::opaque(Vec3::new(0.9, 0.3, 0.7), 0.001));
-    let ground = builder.add_material(Material::lambertian(Vec3::new(0.7, 0.9, 0.2)));
-
-    builder.add_sphere(Sphere { center: Vec3::new(0., 0.5, 1.6), radius: 0.5 }, glass);
-    builder.add_sphere(Sphere { center: Vec3::new(0., 0.7, 0.), radius: 0.7 }, metal);
-    builder.add_sphere(
-        Sphere { center: Vec3::new(-1.522, 0.5, 0.494), radius: 0.5 },
-        diffuse
-    );
-    builder.add_sphere(
-        Sphere { center: Vec3::new(-0.941, 0.5, -1.294), radius: 0.5 },
-        cornflower
-    );
-    builder.add_sphere(
-        Sphere { center: Vec3::new(0.941, 0.5, -1.294), radius: 0.5 },
-        turquoise
-    );
-    builder.add_sphere(
-        Sphere { center: Vec3::new(1.522, 0.5, 0.494), radius: 0.5 },
-        magenta
-    );
-
-    // Ground
-    builder.add_sphere(Sphere { center: Vec3::new(0., -200.001, 0.), radius: 200. }, ground);
-
-    let camera = Camera::look_at(
-        Vec3::new(2.8577466, 5.002403, 3.9194741),
-        Vec3::new(0., 0., 0.),
-        Vec3::new(0., 1., 0.),
-    )
-    .with_fov(30_f32.to_radians());
-
-    let up = Vec3::new(0., 1., 0.);
-    let center = Vec3::new(0., 0.5, 0.);
-    let path = CameraPath {
-        keyframes: vec![
-            CameraKeyframe { origin: Vec3::new( 4.0, 2.0,  4.0), center, up, fov_y: 30_f32.to_radians() },
-            CameraKeyframe { origin: Vec3::new(-4.0, 2.0,  4.0), center, up, fov_y: 30_f32.to_radians() },
-            CameraKeyframe { origin: Vec3::new(-4.0, 2.0, -4.0), center, up, fov_y: 30_f32.to_radians() },
-            CameraKeyframe { origin: Vec3::new( 4.0, 2.0, -4.0), center, up, fov_y: 30_f32.to_radians() },
-            CameraKeyframe { origin: Vec3::new( 4.0, 2.0,  4.0), center, up, fov_y: 30_f32.to_radians() },
-        ],
-        secs_per_segment: 4.0,
-        looping: true,
-    };
-
-    (camera, Some(path), builder)
+/// Collect `*.ron` files from `dir`, sorted by filename for a stable order.
+fn discover_scene_files(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
+        .with_context(|| format!("reading {}", dir.display()))?
+        .filter_map(|entry| entry.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|ext| ext == "ron"))
+        .collect();
+    paths.sort();
+    Ok(paths)
 }
 
-#[rustfmt::skip]
-fn another_scene_with_spheres() -> (Camera, Option<CameraPath>, SceneBuilder) {
-    let mut builder = SceneBuilder::default();
-
-    let blue = builder.add_material(Material::opaque(Vec3::new(0., 0.2, 0.9), 0.001));
-    let metal = builder.add_material(Material::metal(Vec3::new(0.8, 0.3, 0.3)));
-    let glass = builder.add_material(Material::transparent_dielectric(Vec3::all(1.), 1.5));
-    let ground = builder.add_material(Material::lambertian(Vec3::new(1., 0.8, 0.1)));
-
-    builder.add_sphere(Sphere { center: Vec3::new(0., 0.5, 1.6), radius: 0.5 }, blue);
-    builder.add_sphere(Sphere { center: Vec3::new(0., 1.1, 1.6), radius: 0.1 }, glass);
-    builder.add_sphere(Sphere { center: Vec3::new(0., 0.2, 0.5), radius: 0.2 }, metal);
-
-    builder.add_sphere(
-        Sphere { center: Vec3::new(-1.522, 0.5, 0.494), radius: 0.5 },
-        blue
-    );
-    builder.add_sphere(
-        Sphere { center: Vec3::new(-1.522, 1.1, 0.494), radius: 0.1 },
-        glass
-    );
-    builder.add_sphere(
-        Sphere { center: Vec3::new(-0.476, 0.2, 0.154), radius: 0.2 },
-        metal
-    );
-
-    builder.add_sphere(
-        Sphere { center: Vec3::new(-0.941, 0.5, -1.294), radius: 0.5 },
-        blue
-    );
-    builder.add_sphere(
-        Sphere { center: Vec3::new(-0.941, 1.1, -1.294), radius: 0.1 },
-        glass
-    );
-    builder.add_sphere(
-        Sphere { center: Vec3::new(-0.294, 0.2, -0.404), radius: 0.2 },
-        metal
-    );
-
-    builder.add_sphere(
-        Sphere { center: Vec3::new(0.941, 0.5, -1.294), radius: 0.5 },
-        blue
-    );
-    builder.add_sphere(
-        Sphere { center: Vec3::new(0.941, 1.1, -1.294), radius: 0.1 },
-        glass
-    );
-    builder.add_sphere(
-        Sphere { center: Vec3::new(0.294, 0.2, -0.404), radius: 0.2 },
-        metal
-    );
-
-    builder.add_sphere(
-        Sphere { center: Vec3::new(1.522, 0.5, 0.494), radius: 0.5 },
-        blue
-    );
-    builder.add_sphere(
-        Sphere { center: Vec3::new(1.522, 1.1, 0.494), radius: 0.1 },
-        glass
-    );
-    builder.add_sphere(
-        Sphere { center: Vec3::new(0.476, 0.2, 0.154), radius: 0.2 },
-        metal
-    );
-
-    // Ground
-    builder.add_sphere(Sphere { center: Vec3::new(0., -200.001, 0.), radius: 200. }, ground);
-
-    let camera = Camera::look_at(
-        Vec3::new(3.3252046, 1.7924162, 4.541867),
-        Vec3::new(-0.052276053, 0.32371068, -0.09043576),
-        Vec3::new(0., 1., 0.),
-    )
-    .with_fov(30_f32.to_radians());
-
-    let up = Vec3::new(0., 1., 0.);
-    let center = Vec3::new(0., 0.5, 0.);
-    let path = CameraPath {
-        keyframes: vec![
-            // Wide establishing shot
-            CameraKeyframe { origin: Vec3::new( 5.0, 3.0,  5.0), center, up, fov_y: 30_f32.to_radians() },
-            // Swoop down close to one cluster
-            CameraKeyframe { origin: Vec3::new( 1.0, 0.8,  2.5), center: Vec3::new(0., 0.8, 0.), up, fov_y: 50_f32.to_radians() },
-            // Drift across to another cluster
-            CameraKeyframe { origin: Vec3::new(-2.5, 0.8,  1.5), center: Vec3::new(-1., 0.5, 0.), up, fov_y: 50_f32.to_radians() },
-            // Pull back and orbit to the other side
-            CameraKeyframe { origin: Vec3::new(-5.0, 3.0, -5.0), center, up, fov_y: 30_f32.to_radians() },
-            // Back to start
-            CameraKeyframe { origin: Vec3::new( 5.0, 3.0,  5.0), center, up, fov_y: 30_f32.to_radians() },
-        ],
-        secs_per_segment: 5.0,
-        looping: true,
-    };
-
-    (camera, Some(path), builder)
+/// Load a `.ron` file as either a static scene or a procedural world, detected
+/// from its contents (`World(( .. ))` vs a bare scene tuple).
+fn load_source(
+    path: &Path,
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+) -> Result<SceneSource> {
+    let text = std::fs::read_to_string(path)
+        .with_context(|| format!("reading {}", path.display()))?;
+    if scene_def::is_world_source(&text) {
+        let (cfg, camera) = WorldDef::from_ron(&text)?.build()?;
+        Ok(SceneSource::World(World::new(device, layout, cfg, camera)))
+    } else {
+        let (camera, camera_path, builder) = SceneDef::from_ron(&text)?.build()?;
+        Ok(SceneSource::Static(StaticScene {
+            camera,
+            resources: builder.build(device, layout),
+            camera_path,
+        }))
+    }
 }
