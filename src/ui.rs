@@ -1,11 +1,32 @@
 use crate::audio::{AudioControls, AudioMode};
 
+#[derive(Clone, Copy)]
+pub struct PerformanceSettings {
+    pub dynamic_resolution: bool,
+    pub interactive_scale: f32,
+    pub interactive_samples: u32,
+    pub full_quality_delay: f32,
+}
+
+impl Default for PerformanceSettings {
+    fn default() -> Self {
+        Self {
+            dynamic_resolution: false,
+            interactive_scale: 0.5,
+            interactive_samples: 4,
+            full_quality_delay: 0.5,
+        }
+    }
+}
+
 pub struct MusicSettingsUi {
     ctx: egui::Context,
     state: egui_winit::State,
     renderer: egui_wgpu::Renderer,
     controls: AudioControls,
+    performance: PerformanceSettings,
     panel_open: bool,
+    interacted: bool,
 }
 
 impl MusicSettingsUi {
@@ -35,7 +56,9 @@ impl MusicSettingsUi {
             state,
             renderer,
             controls,
+            performance: PerformanceSettings::default(),
             panel_open: false,
+            interacted: false,
         }
     }
 
@@ -49,6 +72,18 @@ impl MusicSettingsUi {
 
     pub fn captures_pointer(&self) -> bool {
         self.ctx.egui_wants_pointer_input() || self.ctx.is_pointer_over_egui()
+    }
+
+    pub fn panel_open(&self) -> bool {
+        self.panel_open
+    }
+
+    pub fn performance_settings(&self) -> PerformanceSettings {
+        self.performance
+    }
+
+    pub fn take_interacted(&mut self) -> bool {
+        std::mem::take(&mut self.interacted)
     }
 
     pub fn render(
@@ -124,6 +159,7 @@ impl MusicSettingsUi {
             .show(ctx, |ui| {
                 if ui.button("⚙").on_hover_text("Music settings").clicked() {
                     self.panel_open = !self.panel_open;
+                    self.interacted = true;
                 }
             });
 
@@ -147,6 +183,7 @@ impl MusicSettingsUi {
                         });
                     if mode != self.controls.mode() {
                         self.controls.set_mode(mode);
+                        self.interacted = true;
                     }
 
                     let mut volume = self.controls.volume();
@@ -155,6 +192,7 @@ impl MusicSettingsUi {
                         .changed()
                     {
                         self.controls.set_volume(volume);
+                        self.interacted = true;
                     }
 
                     let mut arpeggio = self.controls.arpeggio();
@@ -163,6 +201,7 @@ impl MusicSettingsUi {
                         .changed()
                     {
                         self.controls.set_arpeggio(arpeggio);
+                        self.interacted = true;
                     }
 
                     let mut warmth = self.controls.warmth();
@@ -171,11 +210,65 @@ impl MusicSettingsUi {
                         .changed()
                     {
                         self.controls.set_warmth(warmth);
+                        self.interacted = true;
+                    }
+
+                    ui.separator();
+                    ui.label("Performance");
+
+                    if ui
+                        .checkbox(
+                            &mut self.performance.dynamic_resolution,
+                            "Dynamic resolution",
+                        )
+                        .changed()
+                    {
+                        self.interacted = true;
+                    }
+
+                    if ui
+                        .add(
+                            egui::Slider::new(
+                                &mut self.performance.interactive_scale,
+                                0.35..=1.0,
+                            )
+                            .text("Interactive scale"),
+                        )
+                        .changed()
+                    {
+                        self.interacted = true;
+                    }
+
+                    if ui
+                        .add(
+                            egui::Slider::new(
+                                &mut self.performance.interactive_samples,
+                                1..=8,
+                            )
+                            .text("Moving samples"),
+                        )
+                        .changed()
+                    {
+                        self.interacted = true;
+                    }
+
+                    if ui
+                        .add(
+                            egui::Slider::new(
+                                &mut self.performance.full_quality_delay,
+                                0.0..=2.0,
+                            )
+                            .text("Full-quality delay"),
+                        )
+                        .changed()
+                    {
+                        self.interacted = true;
                     }
                 });
 
             if !open {
                 self.panel_open = false;
+                self.interacted = true;
             }
         }
     }

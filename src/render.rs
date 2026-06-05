@@ -13,9 +13,24 @@ pub struct PathTracer {
     uniforms: Uniforms,
     uniform_buffer: wgpu::Buffer,
 
+    window_width: u32,
+    window_height: u32,
+    surface_format: wgpu::TextureFormat,
+    render_width: u32,
+    render_height: u32,
+    render_scale: f32,
+    radiance_samples: [wgpu::Texture; 2],
+    output_texture: wgpu::Texture,
+    output_view: wgpu::TextureView,
+
     pipeline: wgpu::RenderPipeline,
+    render_group_layout: wgpu::BindGroupLayout,
     render_bind_groups: [wgpu::BindGroup; 2],
     scene_group_layout: wgpu::BindGroupLayout,
+    upscale_pipeline: wgpu::RenderPipeline,
+    upscale_bind_group_layout: wgpu::BindGroupLayout,
+    upscale_bind_group: wgpu::BindGroup,
+    upscale_sampler: wgpu::Sampler,
 }
 
 #[derive(Copy, Clone, Pod, Zeroable)]
@@ -25,7 +40,7 @@ struct Uniforms {
     width: u32,
     height: u32,
     frame_count: u32,
-    _pad: u32,
+    samples_per_frame: u32,
 }
 
 impl PathTracer {
@@ -41,8 +56,11 @@ impl PathTracer {
         }));
 
         let shader_module = compile_shader_module(&device);
+        let upscale_shader_module = compile_upscale_shader_module(&device);
         let (pipeline, render_group_layout, scene_group_layout) =
             create_pipeline(&device, &shader_module, surface_format);
+        let (upscale_pipeline, upscale_bind_group_layout) =
+            create_upscale_pipeline(&device, &upscale_shader_module, surface_format);
 
         // Initialize the uniform buffer.
         let uniforms = Uniforms {
@@ -50,7 +68,7 @@ impl PathTracer {
             width,
             height,
             frame_count: 0,
-            _pad: 0,
+            samples_per_frame: 1,
         };
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("uniforms"),
@@ -60,6 +78,20 @@ impl PathTracer {
         });
 
         let radiance_samples = create_sample_textures(&device, width, height);
+        let (output_texture, output_view) =
+            create_output_texture(&device, width, height, surface_format);
+        let upscale_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("upscale sampler"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        let upscale_bind_group = create_upscale_bind_group(
+            &device,
+            &upscale_bind_group_layout,
+            &output_view,
+            &upscale_sampler,
+        );
         let render_bind_groups = create_render_bind_groups(
             &device,
             &render_group_layout,
@@ -72,9 +104,23 @@ impl PathTracer {
             queue,
             uniforms,
             uniform_buffer,
+            window_width: width,
+            window_height: height,
+            surface_format,
+            render_width: width,
+            render_height: height,
+            render_scale: 1.0,
+            radiance_samples,
+            output_texture,
+            output_view,
             pipeline,
+            render_group_layout,
             render_bind_groups,
             scene_group_layout,
+            upscale_pipeline,
+            upscale_bind_group_layout,
+            upscale_bind_group,
+            upscale_sampler,
         }
     }
 
@@ -94,6 +140,49 @@ impl PathTracer {
         self.uniforms.frame_count = 0;
     }
 
+    pub fn set_samples_per_frame(&mut self, samples: u32) {
+        self.uniforms.samples_per_frame = samples.clamp(1, 8);
+    }
+
+    pub fn set_render_scale(&mut self, scale: f32) {
+        let scale = scale.clamp(0.1, 1.0);
+        let render_width = ((self.window_width as f32 * scale).round() as u32).max(1);
+        let render_height = ((self.window_height as f32 * scale).round() as u32).max(1);
+        if render_width == self.render_width && render_height == self.render_height {
+            return;
+        }
+
+        self.render_scale = scale;
+        self.render_width = render_width;
+        self.render_height = render_height;
+        self.uniforms.width = render_width;
+        self.uniforms.height = render_height;
+        self.reset_samples();
+
+        self.radiance_samples =
+            create_sample_textures(&self.device, render_width, render_height);
+        self.render_bind_groups = create_render_bind_groups(
+            &self.device,
+            &self.render_group_layout,
+            &self.radiance_samples,
+            &self.uniform_buffer,
+        );
+        let (output_texture, output_view) = create_output_texture(
+            &self.device,
+            render_width,
+            render_height,
+            self.surface_format,
+        );
+        self.output_texture = output_texture;
+        self.output_view = output_view;
+        self.upscale_bind_group = create_upscale_bind_group(
+            &self.device,
+            &self.upscale_bind_group_layout,
+            &self.output_view,
+            &self.upscale_sampler,
+        );
+    }
+
     pub fn encode_frame(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -109,7 +198,7 @@ impl PathTracer {
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("path tracer render pass"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
+                view: &self.output_view,
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
@@ -128,6 +217,24 @@ impl PathTracer {
         );
         render_pass.set_bind_group(1, scene_resources, &[]);
         render_pass.draw(0..6, 0..1);
+        drop(render_pass);
+
+        let mut upscale_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("upscale render pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        upscale_pass.set_pipeline(&self.upscale_pipeline);
+        upscale_pass.set_bind_group(0, &self.upscale_bind_group, &[]);
+        upscale_pass.draw(0..6, 0..1);
     }
 }
 
@@ -137,6 +244,46 @@ fn compile_shader_module(device: &wgpu::Device) -> wgpu::ShaderModule {
     let code = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/shaders.wgsl"));
     device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: None,
+        source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(code)),
+    })
+}
+
+fn compile_upscale_shader_module(device: &wgpu::Device) -> wgpu::ShaderModule {
+    use std::borrow::Cow;
+
+    let code = r#"
+@group(0) @binding(0) var source_texture: texture_2d<f32>;
+@group(0) @binding(1) var source_sampler: sampler;
+
+struct VertexOut {
+  @builtin(position) position: vec4f,
+  @location(0) uv: vec2f,
+}
+
+alias TriangleVertices = array<vec2f, 6>;
+var<private> vertices: TriangleVertices = TriangleVertices(
+  vec2f(-1.0,  1.0),
+  vec2f(-1.0, -1.0),
+  vec2f( 1.0,  1.0),
+  vec2f( 1.0,  1.0),
+  vec2f(-1.0, -1.0),
+  vec2f( 1.0, -1.0),
+);
+
+@vertex fn upscale_vs(@builtin(vertex_index) vid: u32) -> VertexOut {
+  let pos = vertices[vid];
+  var out: VertexOut;
+  out.position = vec4f(pos, 0.0, 1.0);
+  out.uv = pos * vec2f(0.5, -0.5) + vec2f(0.5);
+  return out;
+}
+
+@fragment fn upscale_fs(in: VertexOut) -> @location(0) vec4f {
+  return textureSample(source_texture, source_sampler, in.uv);
+}
+"#;
+    device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("upscale shader"),
         source: wgpu::ShaderSource::Wgsl(Cow::Borrowed(code)),
     })
 }
@@ -269,6 +416,115 @@ fn create_sample_textures(
     };
     // Create two textures with the same parameters.
     [device.create_texture(&desc), device.create_texture(&desc)]
+}
+
+fn create_output_texture(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("scaled path tracer output"),
+        size: wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    (texture, view)
+}
+
+fn create_upscale_pipeline(
+    device: &wgpu::Device,
+    shader_module: &wgpu::ShaderModule,
+    surface_format: wgpu::TextureFormat,
+) -> (wgpu::RenderPipeline, wgpu::BindGroupLayout) {
+    let bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("upscale bind group layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("upscale pipeline"),
+        layout: Some(
+            &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                bind_group_layouts: &[Some(&bind_group_layout)],
+                ..Default::default()
+            }),
+        ),
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            ..Default::default()
+        },
+        vertex: wgpu::VertexState {
+            module: shader_module,
+            entry_point: Some("upscale_vs"),
+            compilation_options: Default::default(),
+            buffers: &[],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: shader_module,
+            entry_point: Some("upscale_fs"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: surface_format,
+                blend: None,
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        depth_stencil: None,
+        multisample: wgpu::MultisampleState::default(),
+        multiview_mask: None,
+        cache: None,
+    });
+    (pipeline, bind_group_layout)
+}
+
+fn create_upscale_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    source_view: &wgpu::TextureView,
+    sampler: &wgpu::Sampler,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("upscale bind group"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(source_view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    })
 }
 
 fn create_render_bind_groups(

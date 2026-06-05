@@ -284,6 +284,7 @@ impl AmbientSynth {
     fn next_stereo(&mut self) -> (f32, f32) {
         const TAU: f32 = std::f32::consts::TAU;
         const GAINS: [f32; 6] = [0.105, 0.082, 0.058, 0.035, 0.017, 0.010];
+        const OUTPUT_GAIN: f32 = 1.45;
         let warmth = self.controls.warmth();
         let detune_depth = 0.0012 + warmth * 0.0026;
         let detune_blend = 0.16 + warmth * 0.18;
@@ -357,7 +358,7 @@ impl AmbientSynth {
         self.lowpass_left += (left - self.lowpass_left) * smooth;
         self.lowpass_right += (right - self.lowpass_right) * smooth;
 
-        let volume = self.controls.volume();
+        let volume = self.controls.volume() * OUTPUT_GAIN;
         (self.lowpass_left * volume, self.lowpass_right * volume)
     }
 

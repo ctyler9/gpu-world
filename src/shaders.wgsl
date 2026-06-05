@@ -13,6 +13,7 @@ struct Uniforms {
   width: u32,
   height: u32,
   frame_count: u32,
+  samples_per_frame: u32,
 }
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 
@@ -388,9 +389,7 @@ var<private> vertices: TriangleVertices = TriangleVertices(
   return vec4f(vertices[vid], 0.0, 1.0);
 }
 
-@fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
-  init_rng(vec2u(pos.xy));
-
+fn trace_path_sample(pos: vec2f) -> vec3f {
   let origin = uniforms.camera.origin;
   let focus_distance = 1.;
   let aspect_ratio = f32(uniforms.width) / f32(uniforms.height);
@@ -432,6 +431,18 @@ var<private> vertices: TriangleVertices = TriangleVertices(
     ray = scattered.ray;
     path_length += 1u;
   }
+
+  return radiance_sample;
+}
+
+@fragment fn path_tracer_fs(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+  let sample_count = max(uniforms.samples_per_frame, 1u);
+  var radiance_sample = vec3(0.);
+  for (var sample_index = 0u; sample_index < sample_count; sample_index += 1u) {
+    init_rng(vec2u(pos.xy) + vec2u(sample_index * 741103597u, sample_index * 1597334677u));
+    radiance_sample += trace_path_sample(pos.xy);
+  }
+  radiance_sample /= f32(sample_count);
 
   // Fetch the old sum of samples.
   var old_sum: vec3f;

@@ -69,6 +69,7 @@ async fn main() -> Result<()> {
     let mut path_playback: Option<std::time::Instant> = None;
     let mut auto_drift = false;
     let mut last_frame = std::time::Instant::now();
+    let mut last_interaction = std::time::Instant::now();
 
     event_loop.run(|event, control_handle| {
         control_handle.set_control_flow(ControlFlow::Poll);
@@ -103,22 +104,26 @@ async fn main() -> Result<()> {
                                             .current_camera_mut()
                                             .adjust_fov(1_f32.to_radians());
                                         renderer.reset_samples();
+                                        last_interaction = std::time::Instant::now();
                                     }
                                     PhysicalKey::Code(KeyCode::ArrowDown) => {
                                         gallery
                                             .current_camera_mut()
                                             .adjust_fov(-1_f32.to_radians());
                                         renderer.reset_samples();
+                                        last_interaction = std::time::Instant::now();
                                     }
                                     PhysicalKey::Code(KeyCode::ArrowLeft) => {
                                         gallery.select_previous();
                                         path_playback = None;
                                         renderer.reset_samples();
+                                        last_interaction = std::time::Instant::now();
                                     }
                                     PhysicalKey::Code(KeyCode::ArrowRight) => {
                                         gallery.select_next();
                                         path_playback = None;
                                         renderer.reset_samples();
+                                        last_interaction = std::time::Instant::now();
                                     }
                                     PhysicalKey::Code(KeyCode::KeyP) => {
                                         if path_playback.is_some() {
@@ -126,6 +131,7 @@ async fn main() -> Result<()> {
                                         } else if gallery.current_path().is_some() {
                                             path_playback = Some(std::time::Instant::now());
                                         }
+                                        last_interaction = std::time::Instant::now();
                                     }
                                     PhysicalKey::Code(KeyCode::KeyR) => {
                                         match gallery.reload_current(
@@ -135,6 +141,7 @@ async fn main() -> Result<()> {
                                             Ok(()) => {
                                                 path_playback = None;
                                                 renderer.reset_samples();
+                                                last_interaction = std::time::Instant::now();
                                             }
                                             Err(e) => eprintln!("reload failed: {e:#}"),
                                         }
@@ -143,6 +150,7 @@ async fn main() -> Result<()> {
                                         // Toggle slow automatic forward drift, for
                                         // hands-off streaming walkthroughs.
                                         auto_drift = !auto_drift;
+                                        last_interaction = std::time::Instant::now();
                                     }
                                     _ => (),
                                 }
@@ -165,8 +173,12 @@ async fn main() -> Result<()> {
                             MouseButton::Right => right_mouse_button_pressed = pressed,
                             _ => (),
                         }
+                        if pressed {
+                            last_interaction = std::time::Instant::now();
+                        }
                     }
                     WindowEvent::RedrawRequested => {
+                        let now = std::time::Instant::now();
                         if let Some(start) = path_playback {
                             let elapsed = start.elapsed().as_secs_f32();
                             if let Some(cam) =
@@ -174,13 +186,14 @@ async fn main() -> Result<()> {
                             {
                                 *gallery.current_camera_mut() = cam;
                                 renderer.reset_samples();
+                                last_interaction = now;
                             }
                         }
 
                         // Frame-rate-independent movement: scale speeds by the time
                         // since the last frame (world units per second).
-                        let dt = last_frame.elapsed().as_secs_f32();
-                        last_frame = std::time::Instant::now();
+                        let dt = now.duration_since(last_frame).as_secs_f32();
+                        last_frame = now;
                         const MOVE_SPEED: f32 = 3.0;
                         const STRAFE_SPEED: f32 = 3.0;
                         const DRIFT_SPEED: f32 = 2.0;
@@ -208,6 +221,7 @@ async fn main() -> Result<()> {
                         }
                         if moved {
                             renderer.reset_samples();
+                            last_interaction = now;
                         }
 
                         // Stream procedural chunks around the (possibly moved) camera.
@@ -217,7 +231,28 @@ async fn main() -> Result<()> {
                             .update_world(renderer.device(), renderer.scene_group_layout())
                         {
                             renderer.reset_samples();
+                            last_interaction = now;
                         }
+
+                        let performance = music_ui.performance_settings();
+                        let ui_active = music_ui.panel_open() || music_ui.captures_pointer();
+                        let waiting_for_full_quality =
+                            now.duration_since(last_interaction).as_secs_f32()
+                                < performance.full_quality_delay;
+                        let render_scale = if performance.dynamic_resolution
+                            && (ui_active || waiting_for_full_quality)
+                        {
+                            performance.interactive_scale
+                        } else {
+                            1.0
+                        };
+                        renderer.set_render_scale(render_scale);
+                        let samples_per_frame = if ui_active || waiting_for_full_quality {
+                            performance.interactive_samples
+                        } else {
+                            1
+                        };
+                        renderer.set_samples_per_frame(samples_per_frame);
 
                         let frame = match surface.get_current_texture() {
                             wgpu::CurrentSurfaceTexture::Success(frame)
@@ -262,6 +297,9 @@ async fn main() -> Result<()> {
                             &mut encoder,
                             &render_target,
                         );
+                        if music_ui.take_interacted() {
+                            last_interaction = std::time::Instant::now();
+                        }
                         command_buffers.push(encoder.finish());
                         renderer.queue().submit(command_buffers);
 
@@ -282,6 +320,7 @@ async fn main() -> Result<()> {
                     };
                     gallery.current_camera_mut().zoom(delta);
                     renderer.reset_samples();
+                    last_interaction = std::time::Instant::now();
                 }
                 DeviceEvent::MouseMotion { delta: (dx, dy) } => {
                     if music_ui.captures_pointer() {
@@ -292,10 +331,12 @@ async fn main() -> Result<()> {
                     if left_mouse_button_pressed {
                         gallery.current_camera_mut().orbit(dx, dy);
                         renderer.reset_samples();
+                        last_interaction = std::time::Instant::now();
                     }
                     if right_mouse_button_pressed {
                         gallery.current_camera_mut().pan(dx, dy);
                         renderer.reset_samples();
+                        last_interaction = std::time::Instant::now();
                     }
                 }
                 _ => (),
