@@ -71,12 +71,7 @@ async fn main() -> Result<()> {
     let mut key_d = false;
     let mut path_playback: Option<std::time::Instant> = None;
     let mut auto_drift = false;
-    apply_camera_recommendation(
-        &gallery,
-        &mut path_playback,
-        &mut auto_drift,
-        Instant::now(),
-    );
+    apply_camera_recommendation(&gallery, &mut path_playback, &mut auto_drift);
     let mut last_frame = std::time::Instant::now();
     let mut last_interaction = std::time::Instant::now();
     let mut mouse_sensitivity = 1.0_f32;
@@ -142,7 +137,6 @@ async fn main() -> Result<()> {
                                             &gallery,
                                             &mut path_playback,
                                             &mut auto_drift,
-                                            std::time::Instant::now(),
                                         );
                                         renderer.reset_samples();
                                         last_interaction = std::time::Instant::now();
@@ -156,7 +150,6 @@ async fn main() -> Result<()> {
                                             &gallery,
                                             &mut path_playback,
                                             &mut auto_drift,
-                                            std::time::Instant::now(),
                                         );
                                         renderer.reset_samples();
                                         last_interaction = std::time::Instant::now();
@@ -182,7 +175,6 @@ async fn main() -> Result<()> {
                                                     &gallery,
                                                     &mut path_playback,
                                                     &mut auto_drift,
-                                                    std::time::Instant::now(),
                                                 );
                                                 renderer.reset_samples();
                                                 last_interaction = std::time::Instant::now();
@@ -460,7 +452,6 @@ fn apply_camera_recommendation(
     gallery: &gallery::Gallery,
     path_playback: &mut Option<Instant>,
     auto_drift: &mut bool,
-    now: Instant,
 ) {
     match gallery
         .current_metadata()
@@ -472,7 +463,7 @@ fn apply_camera_recommendation(
             *auto_drift = false;
         }
         scene_def::CameraMode::Path => {
-            *path_playback = gallery.current_path().map(|_| now);
+            *path_playback = None;
             *auto_drift = false;
         }
         scene_def::CameraMode::Drift => {
@@ -499,7 +490,7 @@ fn apply_ui_actions(
         if index != gallery.current_index() {
             gallery.select_index(index);
             audio_controls.set_scene_mode(gallery.current_metadata().music);
-            apply_camera_recommendation(gallery, path_playback, auto_drift, now);
+            apply_camera_recommendation(gallery, path_playback, auto_drift);
             renderer.reset_samples();
             interacted = true;
         }
