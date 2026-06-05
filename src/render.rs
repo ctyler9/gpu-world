@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: CC-BY-4.0
 
 use bytemuck::{Pod, Zeroable};
+use std::sync::Arc;
 
 use crate::camera::{Camera, CameraUniforms};
 
@@ -35,7 +36,7 @@ impl PathTracer {
         height: u32,
         surface_format: wgpu::TextureFormat,
     ) -> PathTracer {
-        device.on_uncaptured_error(Box::new(|error| {
+        device.on_uncaptured_error(Arc::new(|error| {
             panic!("Aborting due to an error: {}", error);
         }));
 
@@ -81,6 +82,10 @@ impl PathTracer {
         &self.device
     }
 
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
     pub fn scene_group_layout(&self) -> &wgpu::BindGroupLayout {
         &self.scene_group_layout
     }
@@ -89,8 +94,9 @@ impl PathTracer {
         self.uniforms.frame_count = 0;
     }
 
-    pub fn render_frame(
+    pub fn encode_frame(
         &mut self,
+        encoder: &mut wgpu::CommandEncoder,
         camera: &Camera,
         scene_resources: &wgpu::BindGroup,
         target: &wgpu::TextureView,
@@ -99,12 +105,6 @@ impl PathTracer {
         self.uniforms.frame_count += 1;
         self.queue
             .write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(&self.uniforms));
-
-        let mut encoder =
-            self.device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("render frame"),
-                });
 
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("path tracer render pass"),
@@ -127,15 +127,7 @@ impl PathTracer {
             &[],
         );
         render_pass.set_bind_group(1, scene_resources, &[]);
-
-        // Draw 1 instance of a polygon with 6 vertices
         render_pass.draw(0..6, 0..1);
-
-        // End the render pass by consuming the object.
-        drop(render_pass);
-
-        let command_buffer = encoder.finish();
-        self.queue.submit(Some(command_buffer));
     }
 }
 
@@ -222,7 +214,7 @@ fn create_pipeline(
         label: Some("path tracer"),
         layout: Some(
             &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                bind_group_layouts: &[&render_group_layout, &scene_group_layout],
+                bind_group_layouts: &[Some(&render_group_layout), Some(&scene_group_layout)],
                 ..Default::default()
             }),
         ),
@@ -250,7 +242,7 @@ fn create_pipeline(
         }),
         depth_stencil: None,
         multisample: wgpu::MultisampleState::default(),
-        multiview: None,
+        multiview_mask: None,
         cache: None,
     });
     (pipeline, render_group_layout, scene_group_layout)

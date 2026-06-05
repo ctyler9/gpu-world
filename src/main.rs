@@ -6,7 +6,7 @@ use {
     winit::{
         event::{DeviceEvent, ElementState, Event, MouseScrollDelta, WindowEvent},
         event_loop::{ControlFlow, EventLoop},
-        window::{Window, WindowBuilder},
+        window::Window,
     },
 };
 
@@ -18,30 +18,41 @@ mod procgen;
 mod render;
 mod scene;
 mod scene_def;
+mod ui;
 mod world;
 
 const WIDTH: u32 = 1600;
 const HEIGHT: u32 = 1200;
 
 #[pollster::main]
+#[allow(deprecated)]
 async fn main() -> Result<()> {
     let audio_mode = parse_audio_mode()?;
     let event_loop = EventLoop::new()?;
     let window_size = winit::dpi::PhysicalSize::new(WIDTH, HEIGHT);
-    let window = WindowBuilder::new()
-        .with_inner_size(window_size)
-        .with_resizable(false)
-        .with_title("GPU Path Tracer".to_string())
-        .build(&event_loop)?;
+    let window = event_loop.create_window(
+        Window::default_attributes()
+            .with_inner_size(window_size)
+            .with_resizable(false)
+            .with_title("GPU Path Tracer".to_string()),
+    )?;
 
     let (device, queue, surface, surface_format) = connect_to_gpu(&window).await?;
     let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT, surface_format);
     let mut gallery =
         gallery::Gallery::new(renderer.device(), renderer.scene_group_layout());
 
+    let audio_controls = audio::AudioControls::new(audio_mode);
+    let mut music_ui = ui::MusicSettingsUi::new(
+        &window,
+        renderer.device(),
+        surface_format,
+        audio_controls.clone(),
+    );
+
     // Start the ambient soundtrack. Keep the stream alive for the whole run
     // (dropping it stops playback); a missing audio device is non-fatal.
-    let _audio_stream = match audio::start(audio_mode) {
+    let _audio_stream = match audio::start(audio_controls) {
         Ok(stream) => Some(stream),
         Err(e) => {
             eprintln!("audio disabled: {e:#}");
@@ -62,164 +73,209 @@ async fn main() -> Result<()> {
     event_loop.run(|event, control_handle| {
         control_handle.set_control_flow(ControlFlow::Poll);
         match event {
-            Event::WindowEvent { event, .. } => match event {
-                WindowEvent::CloseRequested => control_handle.exit(),
-                WindowEvent::KeyboardInput {
-                    device_id: _,
-                    event,
-                    ..
-                } => {
-                    use winit::keyboard::{KeyCode, PhysicalKey};
+            Event::WindowEvent { event, .. } => {
+                let egui_response = music_ui.on_window_event(&window, &event);
+                match event {
+                    WindowEvent::CloseRequested => control_handle.exit(),
+                    WindowEvent::KeyboardInput {
+                        device_id: _,
+                        event,
+                        ..
+                    } => {
+                        if egui_response.consumed {
+                            return;
+                        }
+                        use winit::keyboard::{KeyCode, PhysicalKey};
 
-                    let pressed = event.state == ElementState::Pressed;
-                    match event.physical_key {
-                        PhysicalKey::Code(KeyCode::KeyW) => key_w = pressed,
-                        PhysicalKey::Code(KeyCode::KeyS) => key_s = pressed,
-                        PhysicalKey::Code(KeyCode::KeyA) => key_a = pressed,
-                        PhysicalKey::Code(KeyCode::KeyD) => key_d = pressed,
-                        _ => {
-                            if !pressed {
-                                return;
-                            }
-                            match event.physical_key {
-                                PhysicalKey::Code(KeyCode::ArrowUp) => {
-                                    gallery
-                                        .current_camera_mut()
-                                        .adjust_fov(1_f32.to_radians());
-                                    renderer.reset_samples();
+                        let pressed = event.state == ElementState::Pressed;
+                        match event.physical_key {
+                            PhysicalKey::Code(KeyCode::KeyW) => key_w = pressed,
+                            PhysicalKey::Code(KeyCode::KeyS) => key_s = pressed,
+                            PhysicalKey::Code(KeyCode::KeyA) => key_a = pressed,
+                            PhysicalKey::Code(KeyCode::KeyD) => key_d = pressed,
+                            _ => {
+                                if !pressed {
+                                    return;
                                 }
-                                PhysicalKey::Code(KeyCode::ArrowDown) => {
-                                    gallery
-                                        .current_camera_mut()
-                                        .adjust_fov(-1_f32.to_radians());
-                                    renderer.reset_samples();
-                                }
-                                PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                                    gallery.select_previous();
-                                    path_playback = None;
-                                    renderer.reset_samples();
-                                }
-                                PhysicalKey::Code(KeyCode::ArrowRight) => {
-                                    gallery.select_next();
-                                    path_playback = None;
-                                    renderer.reset_samples();
-                                }
-                                PhysicalKey::Code(KeyCode::KeyP) => {
-                                    if path_playback.is_some() {
+                                match event.physical_key {
+                                    PhysicalKey::Code(KeyCode::ArrowUp) => {
+                                        gallery
+                                            .current_camera_mut()
+                                            .adjust_fov(1_f32.to_radians());
+                                        renderer.reset_samples();
+                                    }
+                                    PhysicalKey::Code(KeyCode::ArrowDown) => {
+                                        gallery
+                                            .current_camera_mut()
+                                            .adjust_fov(-1_f32.to_radians());
+                                        renderer.reset_samples();
+                                    }
+                                    PhysicalKey::Code(KeyCode::ArrowLeft) => {
+                                        gallery.select_previous();
                                         path_playback = None;
-                                    } else if gallery.current_path().is_some() {
-                                        path_playback = Some(std::time::Instant::now());
+                                        renderer.reset_samples();
                                     }
-                                }
-                                PhysicalKey::Code(KeyCode::KeyR) => {
-                                    match gallery.reload_current(
-                                        renderer.device(),
-                                        renderer.scene_group_layout(),
-                                    ) {
-                                        Ok(()) => {
+                                    PhysicalKey::Code(KeyCode::ArrowRight) => {
+                                        gallery.select_next();
+                                        path_playback = None;
+                                        renderer.reset_samples();
+                                    }
+                                    PhysicalKey::Code(KeyCode::KeyP) => {
+                                        if path_playback.is_some() {
                                             path_playback = None;
-                                            renderer.reset_samples();
+                                        } else if gallery.current_path().is_some() {
+                                            path_playback = Some(std::time::Instant::now());
                                         }
-                                        Err(e) => eprintln!("reload failed: {e:#}"),
                                     }
+                                    PhysicalKey::Code(KeyCode::KeyR) => {
+                                        match gallery.reload_current(
+                                            renderer.device(),
+                                            renderer.scene_group_layout(),
+                                        ) {
+                                            Ok(()) => {
+                                                path_playback = None;
+                                                renderer.reset_samples();
+                                            }
+                                            Err(e) => eprintln!("reload failed: {e:#}"),
+                                        }
+                                    }
+                                    PhysicalKey::Code(KeyCode::KeyF) => {
+                                        // Toggle slow automatic forward drift, for
+                                        // hands-off streaming walkthroughs.
+                                        auto_drift = !auto_drift;
+                                    }
+                                    _ => (),
                                 }
-                                PhysicalKey::Code(KeyCode::KeyF) => {
-                                    // Toggle slow automatic forward drift, for
-                                    // hands-off streaming walkthroughs.
-                                    auto_drift = !auto_drift;
-                                }
-                                _ => (),
                             }
                         }
                     }
-                }
-                WindowEvent::MouseInput {
-                    device_id: _,
-                    state,
-                    button,
-                } => {
-                    use winit::event::MouseButton;
+                    WindowEvent::MouseInput {
+                        device_id: _,
+                        state,
+                        button,
+                    } => {
+                        if egui_response.consumed {
+                            return;
+                        }
+                        use winit::event::MouseButton;
 
-                    let pressed = state == ElementState::Pressed;
-                    match button {
-                        MouseButton::Left => left_mouse_button_pressed = pressed,
-                        MouseButton::Right => right_mouse_button_pressed = pressed,
-                        _ => (),
+                        let pressed = state == ElementState::Pressed;
+                        match button {
+                            MouseButton::Left => left_mouse_button_pressed = pressed,
+                            MouseButton::Right => right_mouse_button_pressed = pressed,
+                            _ => (),
+                        }
                     }
-                }
-                WindowEvent::RedrawRequested => {
-                    if let Some(start) = path_playback {
-                        let elapsed = start.elapsed().as_secs_f32();
-                        if let Some(cam) =
-                            gallery.current_path().map(|p| p.camera_at(elapsed))
-                        {
-                            *gallery.current_camera_mut() = cam;
+                    WindowEvent::RedrawRequested => {
+                        if let Some(start) = path_playback {
+                            let elapsed = start.elapsed().as_secs_f32();
+                            if let Some(cam) =
+                                gallery.current_path().map(|p| p.camera_at(elapsed))
+                            {
+                                *gallery.current_camera_mut() = cam;
+                                renderer.reset_samples();
+                            }
+                        }
+
+                        // Frame-rate-independent movement: scale speeds by the time
+                        // since the last frame (world units per second).
+                        let dt = last_frame.elapsed().as_secs_f32();
+                        last_frame = std::time::Instant::now();
+                        const MOVE_SPEED: f32 = 3.0;
+                        const STRAFE_SPEED: f32 = 3.0;
+                        const DRIFT_SPEED: f32 = 2.0;
+                        let camera = gallery.current_camera_mut();
+                        let mut moved = false;
+                        if key_w {
+                            camera.fly(-MOVE_SPEED * dt);
+                            moved = true;
+                        }
+                        if key_s {
+                            camera.fly(MOVE_SPEED * dt);
+                            moved = true;
+                        }
+                        if key_a {
+                            camera.pan(-STRAFE_SPEED * dt, 0.0);
+                            moved = true;
+                        }
+                        if key_d {
+                            camera.pan(STRAFE_SPEED * dt, 0.0);
+                            moved = true;
+                        }
+                        if auto_drift {
+                            camera.fly(-DRIFT_SPEED * dt);
+                            moved = true;
+                        }
+                        if moved {
                             renderer.reset_samples();
                         }
-                    }
 
-                    // Frame-rate-independent movement: scale speeds by the time
-                    // since the last frame (world units per second).
-                    let dt = last_frame.elapsed().as_secs_f32();
-                    last_frame = std::time::Instant::now();
-                    const MOVE_SPEED: f32 = 3.0;
-                    const STRAFE_SPEED: f32 = 3.0;
-                    const DRIFT_SPEED: f32 = 2.0;
-                    let camera = gallery.current_camera_mut();
-                    let mut moved = false;
-                    if key_w {
-                        camera.fly(-MOVE_SPEED * dt);
-                        moved = true;
-                    }
-                    if key_s {
-                        camera.fly(MOVE_SPEED * dt);
-                        moved = true;
-                    }
-                    if key_a {
-                        camera.pan(-STRAFE_SPEED * dt, 0.0);
-                        moved = true;
-                    }
-                    if key_d {
-                        camera.pan(STRAFE_SPEED * dt, 0.0);
-                        moved = true;
-                    }
-                    if auto_drift {
-                        camera.fly(-DRIFT_SPEED * dt);
-                        moved = true;
-                    }
-                    if moved {
-                        renderer.reset_samples();
-                    }
+                        // Stream procedural chunks around the (possibly moved) camera.
+                        // Rebuilds the scene buffers only on chunk-boundary crossings;
+                        // reset accumulation when that happens.
+                        if gallery
+                            .update_world(renderer.device(), renderer.scene_group_layout())
+                        {
+                            renderer.reset_samples();
+                        }
 
-                    // Stream procedural chunks around the (possibly moved) camera.
-                    // Rebuilds the scene buffers only on chunk-boundary crossings;
-                    // reset accumulation when that happens.
-                    if gallery.update_world(renderer.device(), renderer.scene_group_layout())
-                    {
-                        renderer.reset_samples();
+                        let frame = match surface.get_current_texture() {
+                            wgpu::CurrentSurfaceTexture::Success(frame)
+                            | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+                            wgpu::CurrentSurfaceTexture::Timeout
+                            | wgpu::CurrentSurfaceTexture::Occluded => {
+                                window.request_redraw();
+                                return;
+                            }
+                            wgpu::CurrentSurfaceTexture::Outdated
+                            | wgpu::CurrentSurfaceTexture::Lost => {
+                                eprintln!("surface changed; restart the app to recreate it");
+                                control_handle.exit();
+                                return;
+                            }
+                            wgpu::CurrentSurfaceTexture::Validation => {
+                                panic!("surface validation error");
+                            }
+                        };
+
+                        let render_target = frame
+                            .texture
+                            .create_view(&wgpu::TextureViewDescriptor::default());
+
+                        let mut encoder = renderer.device().create_command_encoder(
+                            &wgpu::CommandEncoderDescriptor {
+                                label: Some("render frame"),
+                            },
+                        );
+
+                        renderer.encode_frame(
+                            &mut encoder,
+                            gallery.current_camera(),
+                            gallery.current_resources(),
+                            &render_target,
+                        );
+
+                        let mut command_buffers = music_ui.render(
+                            &window,
+                            renderer.device(),
+                            renderer.queue(),
+                            &mut encoder,
+                            &render_target,
+                        );
+                        command_buffers.push(encoder.finish());
+                        renderer.queue().submit(command_buffers);
+
+                        frame.present();
+                        window.request_redraw();
                     }
-
-                    let frame: wgpu::SurfaceTexture = surface
-                        .get_current_texture()
-                        .expect("failed to get current texture");
-
-                    let render_target = frame
-                        .texture
-                        .create_view(&wgpu::TextureViewDescriptor::default());
-
-                    renderer.render_frame(
-                        gallery.current_camera(),
-                        gallery.current_resources(),
-                        &render_target,
-                    );
-
-                    frame.present();
-                    window.request_redraw();
+                    _ => (),
                 }
-                _ => (),
-            },
+            }
             Event::DeviceEvent { event, .. } => match event {
                 DeviceEvent::MouseWheel { delta } => {
+                    if music_ui.captures_pointer() {
+                        return;
+                    }
                     let delta = match delta {
                         MouseScrollDelta::PixelDelta(delta) => 0.001 * delta.y as f32,
                         MouseScrollDelta::LineDelta(_, y) => y * 0.1,
@@ -228,6 +284,9 @@ async fn main() -> Result<()> {
                     renderer.reset_samples();
                 }
                 DeviceEvent::MouseMotion { delta: (dx, dy) } => {
+                    if music_ui.captures_pointer() {
+                        return;
+                    }
                     let dx = dx as f32 * 0.01;
                     let dy = dy as f32 * -0.01;
                     if left_mouse_button_pressed {

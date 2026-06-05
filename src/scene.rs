@@ -329,7 +329,7 @@ fn create_storage_buffer_with_data<T: Pod>(
     });
     if !data.is_empty() {
         let mut view = buffer.slice(..).get_mapped_range_mut();
-        view[..std::mem::size_of_val(data)].copy_from_slice(bytemuck::cast_slice(data));
+        view.copy_from_slice(&bytemuck::cast_slice(data)[..std::mem::size_of_val(data)]);
     }
     buffer.unmap();
     buffer
