@@ -36,7 +36,7 @@ pub struct PerformanceSettings {
 impl Default for PerformanceSettings {
     fn default() -> Self {
         Self {
-            dynamic_resolution: false,
+            dynamic_resolution: true,
             interactive_scale: 0.5,
             motion_quality: MotionQuality::Balanced,
             full_quality_delay: 0.5,
