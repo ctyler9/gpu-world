@@ -6,11 +6,23 @@
 cargo run            # debug build (fast compile, slow render)
 cargo run --release  # optimized build (recommended for rendering)
 cargo build          # compile without running
+cargo test           # run the unit tests
 cargo fmt            # format (max line width: 93, see rustfmt.toml)
 cargo clippy         # lint
 ```
 
-No tests exist in this project.
+### Web (WebGPU) build
+
+```bash
+trunk serve          # build wasm + serve at http://127.0.0.1:8080
+trunk build          # static bundle into dist/
+```
+
+The browser build is dual-targeted from the same source via `#[cfg(target_arch
+= "wasm32")]`. The page lives in `web/index.html`; `Trunk.toml` and `build.rs`
+(which embeds `scenes/*.ron`) stay at the crate root. WebGPU-only — the
+storage-buffer shader has no WebGL2 fallback. Audio, screenshots, and hot-reload
+are native-only.
 
 ## Architecture
 
