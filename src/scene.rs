@@ -232,6 +232,34 @@ impl SceneBuilder {
         self
     }
 
+    /// The XZ-plane bounds `[min_x, max_x, min_z, max_z]` of every object, in
+    /// the order they were added. The streaming layer uses these to bucket
+    /// boxes and cylinders into the acceleration grid by their true footprint
+    /// — a bounding-sphere `center ± radius` would stamp a long wall across a
+    /// huge block of cells and defeat the grid.
+    pub fn object_xz_bounds(&self) -> Vec<[f32; 4]> {
+        self.objects
+            .iter()
+            .map(|o| {
+                if o.kind == OBJECT_KIND_BOX {
+                    // data0 = min corner, data1 = max corner.
+                    let (a, b) = (o.data0, o.data1);
+                    [
+                        a.x().min(b.x()),
+                        a.x().max(b.x()),
+                        a.z().min(b.z()),
+                        a.z().max(b.z()),
+                    ]
+                } else {
+                    // Sphere and cylinder: data0 = center, data1.x = radius.
+                    let c = o.data0;
+                    let r = o.data1.x();
+                    [c.x() - r, c.x() + r, c.z() - r, c.z() + r]
+                }
+            })
+            .collect()
+    }
+
     /// Build the scene bind group with a degenerate single-cell acceleration
     /// grid: every sphere lives in one cell, so the shader's grid traversal
     /// reduces to a brute-force loop. Used by static scenes, whose giant

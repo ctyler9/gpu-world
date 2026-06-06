@@ -258,6 +258,29 @@ impl Grid {
 /// is inserted into every cell its XZ footprint (`±radius`) overlaps — required
 /// so a ray passing through any of those cells will test it.
 fn build_grid(spheres: &[ChunkSphere], cfg: &WorldConfig, center: ChunkCoord) -> Grid {
+    let bounds: Vec<[f32; 4]> = spheres
+        .iter()
+        .map(|s| {
+            [
+                s.center.x() - s.radius,
+                s.center.x() + s.radius,
+                s.center.z() - s.radius,
+                s.center.z() + s.radius,
+            ]
+        })
+        .collect();
+    build_grid_from_bounds(&bounds, cfg, center)
+}
+
+/// Bucket objects into a uniform grid covering the loaded region, given each
+/// object's XZ bounds `[min_x, max_x, min_z, max_z]`. Each object is inserted
+/// into every cell its footprint overlaps so a ray through any of those cells
+/// will test it. Works for any object shape (spheres, boxes, cylinders).
+fn build_grid_from_bounds(
+    bounds: &[[f32; 4]],
+    cfg: &WorldConfig,
+    center: ChunkCoord,
+) -> Grid {
     let r = cfg.view_radius;
     let cell_size = cfg.chunk_size / CELLS_PER_CHUNK as f32;
     let inv_cell = 1.0 / cell_size;
@@ -268,12 +291,12 @@ fn build_grid(spheres: &[ChunkSphere], cfg: &WorldConfig, center: ChunkCoord) ->
     let min_z = (center.1 - r) as f32 * cfg.chunk_size;
     let n_cells = (nx * nz) as usize;
 
-    // Inclusive (clamped) cell footprint of a sphere on the XZ plane.
-    let footprint = |s: &ChunkSphere| -> (i32, i32, i32, i32) {
-        let x0 = (((s.center.x() - s.radius) - min_x) * inv_cell).floor() as i32;
-        let x1 = (((s.center.x() + s.radius) - min_x) * inv_cell).floor() as i32;
-        let z0 = (((s.center.z() - s.radius) - min_z) * inv_cell).floor() as i32;
-        let z1 = (((s.center.z() + s.radius) - min_z) * inv_cell).floor() as i32;
+    // Inclusive (clamped) cell footprint of an object's XZ bounds.
+    let footprint = |b: &[f32; 4]| -> (i32, i32, i32, i32) {
+        let x0 = ((b[0] - min_x) * inv_cell).floor() as i32;
+        let x1 = ((b[1] - min_x) * inv_cell).floor() as i32;
+        let z0 = ((b[2] - min_z) * inv_cell).floor() as i32;
+        let z1 = ((b[3] - min_z) * inv_cell).floor() as i32;
         (
             x0.clamp(0, nx as i32 - 1),
             x1.clamp(0, nx as i32 - 1),
@@ -284,8 +307,8 @@ fn build_grid(spheres: &[ChunkSphere], cfg: &WorldConfig, center: ChunkCoord) ->
 
     // Counting sort: count per cell, prefix-sum to starts, then scatter.
     let mut counts = vec![0u32; n_cells];
-    for s in spheres {
-        let (x0, x1, z0, z1) = footprint(s);
+    for b in bounds {
+        let (x0, x1, z0, z1) = footprint(b);
         for iz in z0..=z1 {
             for ix in x0..=x1 {
                 counts[(iz as u32 * nx + ix as u32) as usize] += 1;
@@ -300,8 +323,8 @@ fn build_grid(spheres: &[ChunkSphere], cfg: &WorldConfig, center: ChunkCoord) ->
     }
     let mut cursor = starts.clone();
     let mut sphere_indices = vec![0u32; acc as usize];
-    for (si, s) in spheres.iter().enumerate() {
-        let (x0, x1, z0, z1) = footprint(s);
+    for (si, b) in bounds.iter().enumerate() {
+        let (x0, x1, z0, z1) = footprint(b);
         for iz in z0..=z1 {
             for ix in x0..=x1 {
                 let c = (iz as u32 * nx + ix as u32) as usize;
@@ -481,7 +504,21 @@ fn assemble_interior(
         }
     }
 
-    builder.build(device, layout)
+    // Bucket the boxes/cylinders into the uniform grid by their true XZ
+    // footprint. Without this the interior brute-forces every wall/column in
+    // the whole loaded region for every ray bounce.
+    let bounds = builder.object_xz_bounds();
+    let grid = build_grid_from_bounds(&bounds, cfg, center);
+    let header = grid
+        .header()
+        .with_background(cfg.background, cfg.sky_amount);
+    builder.build_with_grid(
+        device,
+        layout,
+        header,
+        &grid.cell_ranges,
+        &grid.sphere_indices,
+    )
 }
 
 #[cfg(test)]
