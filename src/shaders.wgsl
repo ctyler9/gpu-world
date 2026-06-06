@@ -117,6 +117,7 @@ struct Object {
 const OBJECT_KIND_SPHERE: u32 = 0u;
 const OBJECT_KIND_BOX: u32 = 1u;
 const OBJECT_KIND_CYLINDER: u32 = 2u;
+const OBJECT_KIND_PYRAMID: u32 = 3u;
 
 fn intersect_sphere(ray: Ray, object: Object) -> Intersection {
   let center = object.data0;
@@ -252,6 +253,80 @@ fn intersect_cylinder(ray: Ray, object: Object) -> Intersection {
   return Intersection(normal, closest_t, object.material_index);
 }
 
+// A right square pyramid: an axis-aligned square base of half-width `h` centered
+// at `data0`, with the apex `height` units directly above the base center. The
+// solid is the intersection of five half-spaces (the base plus four slanted
+// faces), so we clip the ray's t-interval against each plane -- the same slab
+// idea as `intersect_box`, generalized to arbitrary plane normals. The slanted
+// faces all pass through the apex; the base passes through the base center.
+fn intersect_pyramid(ray: Ray, object: Object) -> Intersection {
+  let base = object.data0;
+  let h = object.data1.x;
+  let height = object.data1.y;
+  let apex = vec3f(base.x, base.y + height, base.z);
+
+  // Outward face normals. For the +x face, the outward normal is
+  // normalize((height, h, 0)): it tilts up and out, perpendicular to both the
+  // base edge (0,0,1) and the slope toward the apex (-h, height, 0).
+  var normals = array<vec3f, 5>(
+    normalize(vec3f(height, h, 0.0)),
+    normalize(vec3f(-height, h, 0.0)),
+    normalize(vec3f(0.0, h, height)),
+    normalize(vec3f(0.0, h, -height)),
+    vec3f(0.0, -1.0, 0.0),
+  );
+  var points = array<vec3f, 5>(apex, apex, apex, apex, base);
+
+  var t_near = -FLT_MAX;
+  var t_far = FLT_MAX;
+  var near_n = vec3f(0.0);
+  var far_n = vec3f(0.0);
+
+  for (var i = 0u; i < 5u; i += 1u) {
+    let n = normals[i];
+    let denom = dot(n, ray.direction);
+    let num = dot(n, ray.origin - points[i]);
+    if abs(denom) < 1e-8 {
+      // Ray parallel to this face; if it lies outside the half-space it can
+      // never enter the solid.
+      if num > 0.0 {
+        return no_intersection();
+      }
+    } else {
+      let t = -num / denom;
+      if denom < 0.0 {
+        // Entering this half-space: tightens the near bound.
+        if t > t_near {
+          t_near = t;
+          near_n = n;
+        }
+      } else {
+        // Leaving this half-space: tightens the far bound.
+        if t < t_far {
+          t_far = t;
+          far_n = n;
+        }
+      }
+    }
+  }
+
+  if t_near > t_far {
+    return no_intersection();
+  }
+
+  var t = t_near;
+  var normal = near_n;
+  if t < EPSILON {
+    // Origin is inside the solid: take the exit face instead.
+    t = t_far;
+    normal = far_n;
+  }
+  if t < EPSILON {
+    return no_intersection();
+  }
+  return Intersection(normal, t, object.material_index);
+}
+
 fn intersect_object(ray: Ray, object: Object) -> Intersection {
   if object.kind == OBJECT_KIND_SPHERE {
     return intersect_sphere(ray, object);
@@ -261,6 +336,9 @@ fn intersect_object(ray: Ray, object: Object) -> Intersection {
   }
   if object.kind == OBJECT_KIND_CYLINDER {
     return intersect_cylinder(ray, object);
+  }
+  if object.kind == OBJECT_KIND_PYRAMID {
+    return intersect_pyramid(ray, object);
   }
   return no_intersection();
 }

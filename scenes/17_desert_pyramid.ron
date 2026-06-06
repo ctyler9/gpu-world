@@ -1,0 +1,74 @@
+// An open, sunny desert: a smooth-faced sandstone pyramid sits on the horizon
+// while the foreground is dotted with half-buried rocks and a few cacti. The
+// pyramid is a `Pyramid` primitive -- a right square pyramid with four flat
+// slanted faces -- topped by a small gold capstone that catches the sun. The
+// default sky gradient (white horizon -> blue zenith) reads as a clear midday
+// sky, so no walls or void are needed -- this is a wide-open scene.
+(
+    title: "Desert Pyramid",
+    description: "A stepped sandstone pyramid on the horizon over a sunny desert of rocks and cacti.",
+    music: "ionian",
+    camera_mode: Path,
+    materials: {
+        // Warm sand underfoot.
+        "sand":     Lambertian((0.82, 0.68, 0.42)),
+        // Smooth sandstone for the pyramid faces.
+        "stone":    Lambertian((0.78, 0.64, 0.43)),
+        // The capstone (pyramidion) gleams in the sun.
+        "gold":     Metal((0.95, 0.78, 0.35)),
+        // Foreground detail.
+        "rock":     Lambertian((0.42, 0.37, 0.32)),
+        "cactus":   Lambertian((0.22, 0.44, 0.24)),
+    },
+    objects: [
+        // --- The pyramid, base centered at x=0, z=-20 -----------------------
+        // A right square pyramid: half-width 9, height 11, so its apex is at
+        // (0, 11, -20) and its faces slope at 11/9.
+        Pyramid(base: (0.0, 0.0, -20.0), half_width: 9.0, height: 11.0, mat: "stone"),
+        // A gold pyramidion sharing the same slope, capping the top 1.5 units:
+        // base half-width 1.227 = 1.5 / (11/9) so its faces line up flush.
+        Pyramid(base: (0.0, 9.5, -20.0), half_width: 1.227, height: 1.5, mat: "gold"),
+
+        // --- Foreground rocks, mostly buried so they read as desert stones --
+        Sphere(at: ( 3.0, -0.2,  5.0),  r: 0.8, mat: "rock"),
+        Sphere(at: (-4.0, -0.3,  2.5),  r: 1.1, mat: "rock"),
+        Sphere(at: ( 6.5,  0.0, -1.0),  r: 0.6, mat: "rock"),
+        Sphere(at: (-6.0, -0.2, -4.0),  r: 0.9, mat: "rock"),
+        Sphere(at: ( 1.2,  0.0,  7.0),  r: 0.5, mat: "rock"),
+        Sphere(at: (-1.5, -0.1,  4.0),  r: 0.45, mat: "rock"),
+
+        // --- A saguaro cactus: a trunk with two raised arms. Cylinders are
+        // vertical only, so the arms are short verticals bridged to the trunk
+        // by thin boxes at the "elbows". ----------------------------------
+        Cylinder(center: ( 8.0, 0.0, -3.0), radius: 0.45, y_min: 0.0, y_max: 4.6, mat: "cactus"),
+        // Left arm + elbow.
+        Box(min: (6.95, 1.8, -3.3),  max: (8.0, 2.3, -2.7), mat: "cactus"),
+        Cylinder(center: ( 6.95, 0.0, -3.0), radius: 0.30, y_min: 2.1, y_max: 3.6, mat: "cactus"),
+        // Right arm + elbow (a touch higher).
+        Box(min: (8.0, 2.4, -3.3),   max: (9.1, 2.9, -2.7), mat: "cactus"),
+        Cylinder(center: ( 9.1, 0.0, -3.0), radius: 0.30, y_min: 2.7, y_max: 4.2, mat: "cactus"),
+
+        // A couple of squat barrel cacti for foreground company.
+        Cylinder(center: (-7.5, 0.0,  1.0), radius: 0.6, y_min: 0.0, y_max: 1.0, mat: "cactus"),
+        Cylinder(center: (-3.0, 0.0, -6.0), radius: 0.5, y_min: 0.0, y_max: 0.8, mat: "cactus"),
+
+        Ground("sand"),
+    ],
+    // Pan across the near side of the desert, keeping the pyramid framed in the
+    // background so both the foreground and the monument stay in view.
+    camera: LookAt(
+        eye: (-11.0, 4.0, 12.0),
+        center: (0.0, 5.0, -20.0),
+        up: (0.0, 1.0, 0.0),
+        fov: 40.0,
+    ),
+    path: Keyframes(
+        frames: [
+            (eye: (-11.0, 4.0, 12.0), center: (0.0, 5.0, -20.0), fov: 40.0),
+            (eye: (  0.0, 4.5, 14.0), center: (0.0, 5.0, -20.0), fov: 40.0),
+            (eye: ( 11.0, 4.0, 12.0), center: (0.0, 5.0, -20.0), fov: 40.0),
+        ],
+        secs_per_segment: 6.0,
+        looping: true,
+    ),
+)

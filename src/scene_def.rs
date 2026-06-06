@@ -139,6 +139,14 @@ enum ObjectDef {
         y_max: f32,
         mat: String,
     },
+    /// A right square pyramid with smooth slanted faces: a square base of
+    /// `half_width` centered at `base`, apex `height` units directly above.
+    Pyramid {
+        base: Vec3Def,
+        half_width: f32,
+        height: f32,
+        mat: String,
+    },
     WallPanel {
         min: Vec3Def,
         max: Vec3Def,
@@ -355,6 +363,14 @@ impl SceneDef {
                     mat,
                 } => {
                     builder.cylinder(*center, *radius, *y_min, *y_max, lookup(mat)?);
+                }
+                ObjectDef::Pyramid {
+                    base,
+                    half_width,
+                    height,
+                    mat,
+                } => {
+                    builder.pyramid(*base, *half_width, *height, lookup(mat)?);
                 }
                 ObjectDef::Arch {
                     center,

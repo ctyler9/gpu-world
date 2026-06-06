@@ -81,6 +81,7 @@ struct ObjectBufferEntry {
 const OBJECT_KIND_SPHERE: u32 = 0;
 const OBJECT_KIND_BOX: u32 = 1;
 const OBJECT_KIND_CYLINDER: u32 = 2;
+const OBJECT_KIND_PYRAMID: u32 = 3;
 
 // Must match the `Object` struct stride in shaders.wgsl.
 const _: () = assert!(std::mem::size_of::<ObjectBufferEntry>() == 48);
@@ -183,6 +184,28 @@ impl SceneBuilder {
             data0: center.into(),
             kind: OBJECT_KIND_CYLINDER,
             data1: Vec3::new(radius, y_min, y_max),
+            material_index: material.0,
+            data2: Vec3::zero(),
+            _pad: 0,
+        });
+        self
+    }
+
+    /// A right square pyramid: an axis-aligned square base of `half_width`
+    /// centered at `base_center` (on the XZ plane at `base_center.y`), with the
+    /// apex `height` units directly above. Smooth slanted faces, unlike a stack
+    /// of boxes.
+    pub fn pyramid(
+        &mut self,
+        base_center: impl Into<Vec3>,
+        half_width: f32,
+        height: f32,
+        material: MaterialId,
+    ) -> &mut Self {
+        self.objects.push(ObjectBufferEntry {
+            data0: base_center.into(),
+            kind: OBJECT_KIND_PYRAMID,
+            data1: Vec3::new(half_width, height, 0.0),
             material_index: material.0,
             data2: Vec3::zero(),
             _pad: 0,
