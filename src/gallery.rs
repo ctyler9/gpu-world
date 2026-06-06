@@ -1,17 +1,21 @@
 // Originally written in 2025 by Arman Uguray <arman.uguray@gmail.com>
 // SPDX-License-Identifier: CC-BY-4.0
 
-use std::path::{Path, PathBuf};
-
-use anyhow::{Context, Result};
+use anyhow::Result;
+#[cfg(not(target_arch = "wasm32"))]
+use anyhow::Context;
 
 use crate::{
     camera::{Camera, CameraPath},
+    embedded_scenes::SCENES,
     scene_def::{self, SceneMetadata, WorldDef},
     world::World,
 };
 
-/// Directory that scene `.ron` files are loaded from, relative to the crate.
+/// Directory the `.ron` files live in, used only by native hot-reload (R) to
+/// re-read an edited scene. The web build has no filesystem and relies entirely
+/// on the copies embedded by `build.rs`.
+#[cfg(not(target_arch = "wasm32"))]
 const SCENES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/scenes");
 
 pub struct Gallery {
@@ -20,11 +24,13 @@ pub struct Gallery {
 }
 
 /// One slot in the gallery: either a static authored scene or a procedural
-/// streaming world. `path` is set only for file-backed static scenes (so reload
-/// knows what to re-read).
+/// streaming world. `name` is the scene's file stem (e.g. `"04_cornell_box"`),
+/// used as a title fallback and to locate the file for native hot-reload.
 struct Entry {
     source: SceneSource,
-    path: Option<PathBuf>,
+    // Read by native hot-reload; the web build only uses it at construction.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    name: String,
     metadata: SceneMetadata,
     initial_camera: Camera,
 }
@@ -47,24 +53,19 @@ pub struct SceneOption {
 }
 
 impl Gallery {
-    /// Load every `scenes/*.ron` file — static scenes and procedural worlds
-    /// alike. Broken files are reported and skipped.
+    /// Build every scene embedded by `build.rs` — static scenes and procedural
+    /// worlds alike. Broken files are reported and skipped.
     pub fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
-        let scene_paths = discover_scene_files(SCENES_DIR.as_ref()).unwrap_or_else(|e| {
-            eprintln!("warning: could not read scenes from {SCENES_DIR}: {e:#}");
-            Vec::new()
-        });
-
         let mut entries = Vec::new();
-        for path in scene_paths {
-            match load_entry(&path, device, layout) {
+        for (name, text) in SCENES {
+            match load_entry(name, text, device, layout) {
                 Ok(entry) => entries.push(entry),
-                Err(e) => eprintln!("warning: skipping {}: {e:#}", path.display()),
+                Err(e) => eprintln!("warning: skipping {name}: {e:#}"),
             }
         }
 
         if entries.is_empty() {
-            panic!("no scenes loaded from {SCENES_DIR}; add a .ron file there");
+            panic!("no scenes embedded; add a .ron file under scenes/");
         }
 
         Self {
@@ -87,19 +88,20 @@ impl Gallery {
         }
     }
 
-    /// Re-read the current entry's file and rebuild it (static scene or world).
-    /// Reloading a world resets its view to the spawn camera. On error the
-    /// previously loaded entry is kept.
+    /// Re-read the current entry's file from disk and rebuild it (static scene
+    /// or world). Native-only: the web build has no filesystem and uses the
+    /// embedded scenes. On error the previously loaded entry is kept.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn reload_current(
         &mut self,
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
     ) -> Result<()> {
         let entry = &mut self.entries[self.current_index];
-        let Some(path) = entry.path.clone() else {
-            return Ok(());
-        };
-        let new_entry = load_entry(&path, device, layout)
+        let path = std::path::Path::new(SCENES_DIR).join(format!("{}.ron", entry.name));
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        let new_entry = load_entry(&entry.name.clone(), &text, device, layout)
             .with_context(|| format!("reloading {}", path.display()))?;
         *entry = new_entry;
         Ok(())
@@ -181,40 +183,29 @@ impl Gallery {
     }
 }
 
-/// Collect `*.ron` files from `dir`, sorted by filename for a stable order.
-fn discover_scene_files(dir: &Path) -> Result<Vec<PathBuf>> {
-    let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
-        .with_context(|| format!("reading {}", dir.display()))?
-        .filter_map(|entry| entry.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|ext| ext == "ron"))
-        .collect();
-    paths.sort();
-    Ok(paths)
-}
-
-/// Load a `.ron` file as either a static scene or a procedural world, detected
-/// from its contents (`World(( .. ))` vs a bare scene tuple).
+/// Build a scene from its name + `.ron` text, as either a static scene or a
+/// procedural world, detected from the contents (`World(( .. ))` vs a bare
+/// scene tuple).
 fn load_entry(
-    path: &Path,
+    name: &str,
+    text: &str,
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
 ) -> Result<Entry> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {}", path.display()))?;
-    let fallback_title = title_from_path(path);
-    if scene_def::is_world_source(&text) {
-        let def = WorldDef::from_ron(&text)?;
+    let fallback_title = title_from_stem(name);
+    if scene_def::is_world_source(text) {
+        let def = WorldDef::from_ron(text)?;
         let mut metadata = def.metadata();
         metadata.title.get_or_insert(fallback_title);
         let (cfg, camera) = def.build()?;
         Ok(Entry {
             initial_camera: camera.clone(),
             source: SceneSource::World(World::new(device, layout, cfg, camera)),
-            path: Some(path.to_path_buf()),
+            name: name.to_string(),
             metadata,
         })
     } else {
-        let def = scene_def::SceneDef::from_ron(&text)?;
+        let def = scene_def::SceneDef::from_ron(text)?;
         let mut metadata = def.metadata();
         metadata.title.get_or_insert(fallback_title);
         let (camera, camera_path, builder) = def.build()?;
@@ -225,14 +216,14 @@ fn load_entry(
                 resources: builder.build(device, layout),
                 camera_path,
             }),
-            path: Some(path.to_path_buf()),
+            name: name.to_string(),
             metadata,
         })
     }
 }
 
-fn title_from_path(path: &Path) -> String {
-    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("scene");
+/// Derive a display title from a file stem, e.g. `"04_cornell_box"` -> `"Cornell Box"`.
+fn title_from_stem(stem: &str) -> String {
     let name = stem
         .trim_start_matches(|c: char| c.is_ascii_digit())
         .trim_start_matches('_');

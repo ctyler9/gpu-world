@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+    <title>GPU Path Tracer</title>
+    <link data-trunk rel="rust" data-target-name="gpu_path_tracing" data-wasm-opt="z" />
+    <style>
+      html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+      canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+      #unsupported {
+        position: fixed; inset: 0; display: none; place-content: center;
+        color: #ddd; font: 16px/1.5 system-ui, sans-serif; text-align: center;
+        padding: 2rem;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="unsupported">
+      <div>
+        <h1>WebGPU not available</h1>
+        <p>This path tracer requires a WebGPU-capable browser
+        (Chrome/Edge stable, Safari&nbsp;18+, or Firefox Nightly).</p>
+      </div>
+    </div>
+    <noscript>This application requires JavaScript and WebGPU.</noscript>
+    <script>
+      // Surface a friendly message instead of a silent black canvas when the
+      // browser has no WebGPU. The Rust side also fails loudly to the console.
+      if (!('gpu' in navigator)) {
+        document.getElementById('unsupported').style.display = 'grid';
+      }
+    </script>
+  </body>
+</html>

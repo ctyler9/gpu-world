@@ -2,3 +2,4 @@
 Cargo.lock
 screenshots/
 target/
+dist/

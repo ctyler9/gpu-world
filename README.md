@@ -47,6 +47,24 @@ cargo run             # debug build (slow render)
 cargo test            # run the unit tests
 ```
 
+## Running in the browser (WebGPU)
+
+The renderer also runs on the web via WebGPU. Because it relies on storage
+buffers, there is **no WebGL2 fallback** — you need a WebGPU-capable browser
+(Chrome/Edge stable, Safari 18+, or Firefox Nightly).
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo install --locked trunk        # one-time; bundles wasm-bindgen
+trunk serve                         # then open http://127.0.0.1:8080
+trunk build                         # or produce a static bundle in dist/
+```
+
+Audio and screenshots are native-only for now; everything else (rendering, the
+egui panel, scene switching, camera controls) works in the browser. Scenes are
+embedded into the binary at build time (`build.rs`), so the `scenes/` directory
+is only needed for native hot-reload (**R**).
+
 ## Controls
 
 | Input | Action |

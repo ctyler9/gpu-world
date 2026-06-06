@@ -1,0 +1,9 @@
+[build]
+target = "index.html"
+# wgpu/winit produce a large module; the release profile + wasm-opt keep it sane.
+release = true
+
+[serve]
+address = "127.0.0.1"
+port = 8080
+open = false

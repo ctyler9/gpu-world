@@ -5,8 +5,14 @@
 //! thread. The callback avoids expensive effects so it stays stable while the
 //! renderer is busy.
 
+// The cpal synth backend is native-only; the web build keeps just the
+// AudioMode/AudioControls types (pure atomics) so the UI and renderer compile
+// unchanged.
+#[cfg(not(target_arch = "wasm32"))]
 use anyhow::{Context, Result};
+#[cfg(not(target_arch = "wasm32"))]
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+#[cfg(not(target_arch = "wasm32"))]
 use cpal::{FromSample, SizedSample};
 use serde::de::{Error, Visitor};
 use serde::{Deserialize, Deserializer};
@@ -162,6 +168,7 @@ impl AudioControls {
         self.inner.scene_mode.store(index, Ordering::Relaxed);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn effective_mode(&self) -> AudioMode {
         let selected = self.mode();
         if selected != AudioMode::Auto {
@@ -230,6 +237,7 @@ impl AudioControls {
         f32::from_bits(self.inner.energy.load(Ordering::Relaxed))
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn set_energy(&self, value: f32) {
         self.inner
             .energy
@@ -242,6 +250,7 @@ const NO_SCENE_MODE: u8 = u8::MAX;
 /// Start the ambient soundtrack on the default output device. The returned
 /// [`cpal::Stream`] must be kept alive for audio to keep playing — drop it to
 /// stop.
+#[cfg(not(target_arch = "wasm32"))]
 pub fn start(controls: AudioControls) -> Result<cpal::Stream> {
     let host = cpal::default_host();
     let device = output_device(&host)?;
@@ -261,6 +270,7 @@ pub fn start(controls: AudioControls) -> Result<cpal::Stream> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn output_device(host: &cpal::Host) -> Result<cpal::Device> {
     if let Ok(requested) = std::env::var("GPU_WORLD_AUDIO_DEVICE") {
         let requested = requested.to_lowercase();
@@ -284,6 +294,7 @@ fn output_device(host: &cpal::Host) -> Result<cpal::Device> {
 }
 
 /// Build the synth and wire it to a cpal output stream of sample type `T`.
+#[cfg(not(target_arch = "wasm32"))]
 fn run<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
@@ -315,6 +326,7 @@ where
     Ok(stream)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct AmbientSynth {
     controls: AudioControls,
     active_mode: AudioMode,
@@ -342,6 +354,7 @@ struct AmbientSynth {
     sample_index: u64,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl AmbientSynth {
     fn new(sample_rate: f32, controls: AudioControls) -> Self {
         let active_mode = controls.effective_mode();
@@ -529,12 +542,14 @@ impl AmbientSynth {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct ModeProgression {
     root_midi: i32,
     scale: [i32; 7],
     progression: [usize; 8],
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn current_mode(chord: u64, mode: AudioMode) -> &'static ModeProgression {
     const IONIAN: [i32; 7] = [0, 2, 4, 5, 7, 9, 11];
     const DORIAN: [i32; 7] = [0, 2, 3, 5, 7, 9, 10];
@@ -580,20 +595,24 @@ fn current_mode(chord: u64, mode: AudioMode) -> &'static ModeProgression {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn scale_midi(root_midi: i32, scale: [i32; 7], degree: usize, octave_offset: i32) -> i32 {
     let octave = (degree / 7) as i32 + octave_offset;
     root_midi + scale[degree % 7] + octave * 12
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn midi_to_hz(note: i32) -> f32 {
     440.0 * 2.0_f32.powf((note as f32 - 69.0) / 12.0)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn smoothstep(value: f32) -> f32 {
     let value = value.clamp(0.0, 1.0);
     value * value * (3.0 - 2.0 * value)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn wrap_phase(phase: f32) -> f32 {
     if phase >= std::f32::consts::TAU {
         phase - std::f32::consts::TAU

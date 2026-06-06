@@ -3,16 +3,39 @@ name = "gpu-path-tracing"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+# rlib for the native binary + tests; cdylib for the wasm-bindgen browser build.
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 anyhow = "1.0.68"
 bytemuck = { version = "1.13.1", features = ["derive"] }
-cpal = "0.15"
 egui = "0.34.3"
 egui-wgpu = "0.34.3"
-egui-winit = "0.34.3"
-image = { version = "0.25.10", default-features = false, features = ["png"] }
-pollster = { version = "0.3", features = ["macro"] }
+log = "0.4"
 ron = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 winit = "0.30"
-wgpu = "29"
+# `webgpu` enables the browser WebGPU backend; ignored on native targets.
+wgpu = { version = "29", features = ["webgpu"] }
+
+# Native-only: audio (cpal -> ALSA/CoreAudio), PNG screenshots, and the
+# block-on executor used by the desktop entry point.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+cpal = "0.15"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
+pollster = "0.3"
+# Default features (clipboard via arboard, x11/wayland) are fine on desktop.
+egui-winit = "0.34.3"
+
+# Web-only: wasm-bindgen glue, browser APIs, panic/log plumbing, and a
+# Performance-backed clock (std::time::Instant panics on wasm).
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Document", "Window", "Element", "HtmlCanvasElement"] }
+console_error_panic_hook = "0.1"
+console_log = "1"
+web-time = "1.1"
+# Disable arboard clipboard (no wasm support) and other desktop-only defaults.
+egui-winit = { version = "0.34.3", default-features = false }

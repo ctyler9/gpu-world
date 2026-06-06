@@ -766,49 +766,39 @@ impl WorldDef {
 #[cfg(test)]
 mod tests {
     use super::{is_world_source, SceneDef, WorldDef};
+    use crate::embedded_scenes::SCENES;
 
     /// Every shipped scene/world file must parse and lower without error.
     #[test]
     fn shipped_scenes_load() {
-        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/scenes");
         let mut count = 0;
-        for entry in std::fs::read_dir(dir).expect("scenes dir") {
-            let path = entry.unwrap().path();
-            if path.extension().is_none_or(|e| e != "ron") {
-                continue;
-            }
-            let text = std::fs::read_to_string(&path).unwrap();
-            if is_world_source(&text) {
-                let def = WorldDef::from_ron(&text)
-                    .unwrap_or_else(|e| panic!("parsing world {}: {e:#}", path.display()));
+        for (name, text) in SCENES {
+            if is_world_source(text) {
+                let def = WorldDef::from_ron(text)
+                    .unwrap_or_else(|e| panic!("parsing world {name}: {e:#}"));
                 def.build()
-                    .unwrap_or_else(|e| panic!("building world {}: {e:#}", path.display()));
+                    .unwrap_or_else(|e| panic!("building world {name}: {e:#}"));
             } else {
-                let def = SceneDef::from_ron(&text)
-                    .unwrap_or_else(|e| panic!("parsing {}: {e:#}", path.display()));
+                let def = SceneDef::from_ron(text)
+                    .unwrap_or_else(|e| panic!("parsing {name}: {e:#}"));
                 def.build()
-                    .unwrap_or_else(|e| panic!("building {}: {e:#}", path.display()));
+                    .unwrap_or_else(|e| panic!("building {name}: {e:#}"));
             }
             count += 1;
         }
-        assert!(count > 0, "no scene files found in {dir}");
+        assert!(count > 0, "no scene files embedded");
     }
 
     /// Lowering is deterministic: same world text -> identical palette order and
     /// resolved indices (guards against HashMap nondeterminism in the palette).
     #[test]
     fn world_lowering_is_deterministic() {
-        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/scenes");
-        for entry in std::fs::read_dir(dir).expect("scenes dir") {
-            let path = entry.unwrap().path();
-            let Ok(text) = std::fs::read_to_string(&path) else {
-                continue;
-            };
-            if !is_world_source(&text) {
+        for (_name, text) in SCENES {
+            if !is_world_source(text) {
                 continue;
             }
-            let a = WorldDef::from_ron(&text).unwrap().build().unwrap().0;
-            let b = WorldDef::from_ron(&text).unwrap().build().unwrap().0;
+            let a = WorldDef::from_ron(text).unwrap().build().unwrap().0;
+            let b = WorldDef::from_ron(text).unwrap().build().unwrap().0;
             assert_eq!(a.palette.len(), b.palette.len());
             // Style mats/bands are baked from palette order; compare via Debug.
             assert_eq!(format!("{:?}", a.style), format!("{:?}", b.style));

@@ -2,10 +2,9 @@
 // SPDX-License-Identifier: CC-BY-4.0
 
 use bytemuck::{Pod, Zeroable};
-use std::{
-    path::Path,
-    sync::{mpsc, Arc},
-};
+use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
+use std::{path::Path, sync::mpsc};
 
 use crate::camera::{Camera, CameraUniforms};
 
@@ -264,6 +263,7 @@ impl PathTracer {
         );
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn save_screenshot(&self, path: &Path) -> anyhow::Result<()> {
         let width = self.render_width;
         let height = self.render_height;
@@ -643,6 +643,7 @@ fn create_sample_textures(
     [device.create_texture(&desc), device.create_texture(&desc)]
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn align_to(value: u32, alignment: u32) -> u32 {
     value.div_ceil(alignment) * alignment
 }
