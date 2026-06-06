@@ -35,12 +35,22 @@ async fn main() -> Result<()> {
     let window = event_loop.create_window(
         Window::default_attributes()
             .with_inner_size(window_size)
-            .with_resizable(false)
+            .with_resizable(true)
             .with_title("GPU Path Tracer".to_string()),
     )?;
 
-    let (device, queue, surface, surface_format) = connect_to_gpu(&window).await?;
-    let mut renderer = render::PathTracer::new(device, queue, WIDTH, HEIGHT, surface_format);
+    let (device, queue, surface, mut surface_config) = connect_to_gpu(&window).await?;
+    let surface_format = surface_config.format;
+    // Size the renderer to the surface the compositor actually gave us. On
+    // tiling/fullscreen setups (e.g. Sway) this can differ from the requested
+    // WIDTH/HEIGHT immediately at startup.
+    let mut renderer = render::PathTracer::new(
+        device,
+        queue,
+        surface_config.width,
+        surface_config.height,
+        surface_format,
+    );
     let mut gallery =
         gallery::Gallery::new(renderer.device(), renderer.scene_group_layout());
 
@@ -85,6 +95,19 @@ async fn main() -> Result<()> {
                 let egui_response = music_ui.on_window_event(&window, &event);
                 match event {
                     WindowEvent::CloseRequested => control_handle.exit(),
+                    WindowEvent::Resized(size) => {
+                        // The compositor decides our real size (fullscreen,
+                        // tiling WMs, manual resize). Reconfigure the surface
+                        // and render targets to match, or the UI scissor/blit
+                        // falls outside the surface and wgpu aborts.
+                        if size.width > 0 && size.height > 0 {
+                            surface_config.width = size.width;
+                            surface_config.height = size.height;
+                            surface.configure(renderer.device(), &surface_config);
+                            renderer.resize(size.width, size.height);
+                            window.request_redraw();
+                        }
+                    }
                     WindowEvent::KeyboardInput {
                         device_id: _,
                         event,
@@ -599,7 +622,7 @@ async fn connect_to_gpu(
     wgpu::Device,
     wgpu::Queue,
     wgpu::Surface<'_>,
-    wgpu::TextureFormat,
+    wgpu::SurfaceConfiguration,
 )> {
     use wgpu::TextureFormat::{Bgra8Unorm, Rgba8Unorm};
 
@@ -649,5 +672,5 @@ async fn connect_to_gpu(
     };
     surface.configure(&device, &config);
 
-    Ok((device, queue, surface, format))
+    Ok((device, queue, surface, config))
 }

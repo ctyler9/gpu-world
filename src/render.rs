@@ -202,13 +202,35 @@ impl PathTracer {
 
     pub fn set_render_scale(&mut self, scale: f32) {
         let scale = scale.clamp(0.1, 1.0);
-        let render_width = ((self.window_width as f32 * scale).round() as u32).max(1);
-        let render_height = ((self.window_height as f32 * scale).round() as u32).max(1);
+        self.render_scale = scale;
+        self.rebuild_render_textures();
+    }
+
+    /// Match the renderer to a new window/surface size. The internal render
+    /// targets are sized from this times the current render scale.
+    pub fn resize(&mut self, width: u32, height: u32) {
+        let width = width.max(1);
+        let height = height.max(1);
+        if width == self.window_width && height == self.window_height {
+            return;
+        }
+        self.window_width = width;
+        self.window_height = height;
+        self.rebuild_render_textures();
+    }
+
+    /// Recreate the radiance/output textures (and their bind groups) for the
+    /// current window size and render scale. A no-op if the derived dimensions
+    /// are unchanged.
+    fn rebuild_render_textures(&mut self) {
+        let render_width =
+            ((self.window_width as f32 * self.render_scale).round() as u32).max(1);
+        let render_height =
+            ((self.window_height as f32 * self.render_scale).round() as u32).max(1);
         if render_width == self.render_width && render_height == self.render_height {
             return;
         }
 
-        self.render_scale = scale;
         self.render_width = render_width;
         self.render_height = render_height;
         self.uniforms.width = render_width;
