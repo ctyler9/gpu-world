@@ -280,6 +280,12 @@ pub async fn run() -> Result<()> {
                         }
                     }
                     WindowEvent::RedrawRequested => {
+                        // The browser doesn't resize the canvas to fill the
+                        // page on its own; match it to the viewport each frame.
+                        // Any change fires `Resized`, handled above.
+                        #[cfg(target_arch = "wasm32")]
+                        sync_canvas_to_viewport(&window);
+
                         let now = Instant::now();
                         if let Some(start) = path_playback {
                             let elapsed = start.elapsed().as_secs_f32();
@@ -671,6 +677,35 @@ fn parse_audio_mode() -> Result<audio::AudioMode> {
     }
 
     Ok(audio_mode)
+}
+
+/// Resize the winit window to match the browser viewport (in physical pixels,
+/// so it stays crisp on hi-DPI displays). winit owns the canvas's inline size
+/// style, so filling the page means resizing through winit rather than CSS.
+#[cfg(target_arch = "wasm32")]
+fn sync_canvas_to_viewport(window: &Window) {
+    let Some(web_window) = web_sys::window() else {
+        return;
+    };
+    let dpr = web_window.device_pixel_ratio();
+    let (Ok(width), Ok(height)) = (web_window.inner_width(), web_window.inner_height())
+    else {
+        return;
+    };
+    let (Some(width), Some(height)) = (width.as_f64(), height.as_f64()) else {
+        return;
+    };
+    let target = winit::dpi::PhysicalSize::new(
+        (width * dpr).round() as u32,
+        (height * dpr).round() as u32,
+    );
+    if target.width == 0 || target.height == 0 {
+        return;
+    }
+    if window.inner_size() != target {
+        // Triggers `WindowEvent::Resized`, which reconfigures the surface.
+        let _ = window.request_inner_size(target);
+    }
 }
 
 async fn connect_to_gpu(
